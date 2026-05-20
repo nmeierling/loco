@@ -26,12 +26,15 @@ interface MetricOption {
         (ngModelChange)="updateName($event)"
       />
       <input
-        class="search"
+        class="search path"
         type="search"
-        placeholder="filter by path…"
+        placeholder="filter by path… (click the funnel next to a folder)"
         [ngModel]="filters().path"
         (ngModelChange)="updatePath($event)"
       />
+      @if (filters().path) {
+        <button class="clear" type="button" (click)="updatePath('')" title="Clear path filter">×</button>
+      }
 
       <div class="group">
         <span class="label">metric</span>
@@ -96,9 +99,32 @@ interface MetricOption {
         font-family: inherit;
         min-width: 140px;
       }
+      .search.path {
+        min-width: 440px;
+        flex: 1 1 440px;
+      }
       .search:focus {
         outline: none;
         border-color: var(--accent);
+      }
+      .clear {
+        background: transparent;
+        color: inherit;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        width: 22px;
+        height: 22px;
+        padding: 0;
+        cursor: pointer;
+        font-size: 14px;
+        line-height: 1;
+        opacity: 0.6;
+        margin-left: -4px;
+      }
+      .clear:hover {
+        opacity: 1;
+        border-color: var(--accent);
+        color: var(--accent);
       }
       .group {
         display: flex;

@@ -28,6 +28,22 @@ export class AnalysisStore {
     return filtered && isDir(filtered) ? filtered : root;
   });
 
+  /** Set of file paths that survive name + path + user-ignore filters. Used by repo-wide vizzes. */
+  readonly filteredPaths = computed<ReadonlySet<string>>(() => {
+    const root = this.filteredRoot();
+    const out = new Set<string>();
+    if (!root) return out;
+    const visit = (n: TreeNode): void => {
+      if (isFile(n)) {
+        out.add(n.path);
+      } else {
+        for (const c of n.children) visit(c);
+      }
+    };
+    visit(root);
+    return out;
+  });
+
   setRoot(root: DirNode, rootName: string, blobs: ReadonlyMap<string, File>): void {
     this.root.set(root);
     this.rootName.set(rootName);

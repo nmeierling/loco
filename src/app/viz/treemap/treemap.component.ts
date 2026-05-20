@@ -211,7 +211,9 @@ export class TreemapComponent implements AfterViewInit {
       .size([w, h])
       .paddingInner(1)
       .paddingTop((d) => (d.depth > 0 ? Math.min(12, Math.max(0, h * 0.01)) : 0))
-      .tile(treemapSquarify);
+      // Target tiles ~2.6:1 wide-to-tall so filenames fit on a single line. Default
+      // is the golden ratio (~1.618) which yields visibly column-shaped tiles.
+      .tile(treemapSquarify.ratio(2.6));
 
     tm(h0);
 

@@ -256,10 +256,13 @@ export class DependencyMatrixComponent implements AfterViewInit {
     return out;
   });
 
+  private fullGraph: { nodes: { path: string }[]; edges: { from: string; to: string }[] } | null = null;
+
   constructor() {
     effect(() => {
       this.store.root();
       this.service.reset();
+      this.fullGraph = null;
       this.paths.set([]);
       this.names.set([]);
       this.adjacency = new Set();
@@ -272,6 +275,13 @@ export class DependencyMatrixComponent implements AfterViewInit {
       const root = this.store.root();
       if (root && w > 0 && h > 0 && this.status() === 'idle') {
         this.kickoff();
+      }
+    });
+
+    effect(() => {
+      const filtered = this.store.filteredPaths();
+      if (this.fullGraph && this.status() === 'ready') {
+        this.applyFilter(filtered);
       }
     });
   }
@@ -296,14 +306,22 @@ export class DependencyMatrixComponent implements AfterViewInit {
       this.status.set('empty');
       return;
     }
-    const sorted = [...graph.nodes]
+    this.fullGraph = { nodes: graph.nodes.map((n) => ({ path: n.path })), edges: graph.edges };
+    this.applyFilter(this.store.filteredPaths());
+    this.status.set('ready');
+  }
+
+  private applyFilter(filtered: ReadonlySet<string>): void {
+    if (!this.fullGraph) return;
+    const sorted = this.fullGraph.nodes
       .map((n) => n.path)
+      .filter((p) => filtered.has(p))
       .sort((a, b) => a.localeCompare(b));
     const indexOf = new Map<string, number>();
     sorted.forEach((p, i) => indexOf.set(p, i));
-    const set = new Set<number>();
     const n = sorted.length;
-    for (const e of graph.edges) {
+    const set = new Set<number>();
+    for (const e of this.fullGraph.edges) {
       const ri = indexOf.get(e.from);
       const ci = indexOf.get(e.to);
       if (ri !== undefined && ci !== undefined) set.add(ri * n + ci);
@@ -311,7 +329,6 @@ export class DependencyMatrixComponent implements AfterViewInit {
     this.adjacency = set;
     this.paths.set(sorted);
     this.names.set(sorted.map((p) => p.split('/').pop() ?? p));
-    this.status.set('ready');
   }
 
   cellFill(cell: Cell): string {

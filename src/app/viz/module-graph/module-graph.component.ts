@@ -291,11 +291,14 @@ export class ModuleGraphComponent implements AfterViewInit {
   private simLinks: SimLink[] = [];
   private rafHandle = 0;
 
+  private fullGraph: { nodes: GraphNode[]; edges: GraphEdge[] } | null = null;
+
   constructor() {
     effect(() => {
       // React when project root changes — invalidate graph
       this.store.root();
       this.service.reset();
+      this.fullGraph = null;
       this.nodes.set([]);
       this.links.set([]);
       this.status.set('idle');
@@ -308,6 +311,14 @@ export class ModuleGraphComponent implements AfterViewInit {
       const root = this.store.root();
       if (root && w > 0 && h > 0 && this.status() === 'idle') {
         this.kickoff();
+      }
+    });
+
+    effect(() => {
+      // Re-render whenever the project-wide path/name/user-ignore filter changes.
+      const filtered = this.store.filteredPaths();
+      if (this.fullGraph && this.status() === 'ready') {
+        this.applyFilter(filtered);
       }
     });
   }
@@ -345,8 +356,23 @@ export class ModuleGraphComponent implements AfterViewInit {
       this.status.set('empty');
       return;
     }
-    this.startSimulation(graph.nodes, graph.edges);
+    this.fullGraph = { nodes: graph.nodes, edges: graph.edges };
+    this.applyFilter(this.store.filteredPaths());
     this.status.set('ready');
+  }
+
+  private applyFilter(filtered: ReadonlySet<string>): void {
+    if (!this.fullGraph) return;
+    const nodes = this.fullGraph.nodes.filter((n) => filtered.has(n.path));
+    const keep = new Set(nodes.map((n) => n.path));
+    const edges = this.fullGraph.edges.filter((e) => keep.has(e.from) && keep.has(e.to));
+    if (nodes.length === 0) {
+      this.simulation?.stop();
+      this.nodes.set([]);
+      this.links.set([]);
+      return;
+    }
+    this.startSimulation(nodes, edges);
   }
 
   private startSimulation(nodes: GraphNode[], edges: GraphEdge[]): void {

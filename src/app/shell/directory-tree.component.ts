@@ -22,6 +22,19 @@ import { DirNode, MetricKind, TreeNode, isDir, isFile, metricValue } from '../co
         <span class="chev">{{ expanded() ? '▾' : '▸' }}</span>
         <span class="icon">{{ expanded() ? '📂' : '📁' }}</span>
         <span class="name" [title]="dir.path || rootName()">{{ dir.name || rootName() }}</span>
+        @if (dir.path) {
+          <button
+            class="filter-btn"
+            type="button"
+            (click)="setPathFilter($event, dir.path)"
+            [title]="'Filter by path: ' + dir.path"
+            aria-label="Filter by this directory"
+          >
+            <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">
+              <path d="M1.5 2.5h13l-5 6.2v4l-3-1v-3l-5-6.2z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
+            </svg>
+          </button>
+        }
         <span class="meta">{{ value() | number }}</span>
       </div>
       @if (expanded()) {
@@ -65,6 +78,29 @@ import { DirNode, MetricKind, TreeNode, isDir, isFile, metricValue } from '../co
       }
       .row:hover {
         background: var(--hover);
+      }
+      .filter-btn {
+        opacity: 0;
+        background: transparent;
+        color: inherit;
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        width: 18px;
+        height: 18px;
+        padding: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        flex-shrink: 0;
+      }
+      .row.dir:hover .filter-btn {
+        opacity: 0.75;
+      }
+      .filter-btn:hover {
+        opacity: 1 !important;
+        color: var(--accent);
+        border-color: var(--accent);
       }
       .row.selected {
         background: color-mix(in srgb, var(--accent) 22%, transparent);
@@ -153,6 +189,11 @@ export class TreeNodeComponent {
       this.store.selectPath(this.node.path);
       this.router.navigate(['/ast']);
     }
+  }
+
+  setPathFilter(ev: Event, path: string): void {
+    ev.stopPropagation();
+    this.store.updateFilters({ path });
   }
 }
 
