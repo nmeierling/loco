@@ -17,8 +17,9 @@ export class AnalysisService {
   async analyze(load: LoadResult): Promise<void> {
     this.store.status.set({ phase: 'loading', message: `Reading ${load.rootName}…` });
 
-    const ignorePatterns = await this.collectGitignores(load.files);
-    const ig = this.ig.build(ignorePatterns);
+    const gitignorePatterns = await this.collectGitignores(load.files);
+    this.ig.setGitignorePatterns(gitignorePatterns);
+    const ig = this.ig.analysisIgnore();
     const accepted = load.files.filter((f) => !ig.ignores(f.path));
 
     const inputs: LocInput[] = accepted.map((f, i) => ({

@@ -1,10 +1,13 @@
-import { Injectable, computed, signal } from '@angular/core';
+import { Injectable, computed, inject, signal } from '@angular/core';
 import { DirNode, TreeNode, isDir, isFile } from '../models/tree';
 import { AnalysisPhase } from '../models/analysis';
 import { DEFAULT_FILTERS, Filters } from '../models/filters';
+import { IgnoreService } from '../services/ignore.service';
 
 @Injectable({ providedIn: 'root' })
 export class AnalysisStore {
+  private readonly ig = inject(IgnoreService);
+
   readonly root = signal<DirNode | null>(null);
   readonly rootName = signal<string>('');
   readonly status = signal<AnalysisPhase>({ phase: 'idle' });
@@ -17,8 +20,11 @@ export class AnalysisStore {
     const root = this.root();
     if (!root) return null;
     const { name, path } = this.filters();
-    if (!name && !path) return root;
-    const filtered = applyFilters(root, name.toLowerCase(), path.toLowerCase());
+    const userPatterns = this.ig.userPatterns();
+    const userIg = userPatterns.length > 0 ? this.ig.userIgnore() : null;
+    if (!name && !path && !userIg) return root;
+    const matcher = userIg ? (p: string) => userIg.ignores(p) : null;
+    const filtered = applyFilters(root, name.toLowerCase(), path.toLowerCase(), matcher);
     return filtered && isDir(filtered) ? filtered : root;
   });
 
@@ -46,16 +52,23 @@ export class AnalysisStore {
   }
 }
 
-function applyFilters(node: TreeNode, nameQ: string, pathQ: string): TreeNode | null {
+function applyFilters(
+  node: TreeNode,
+  nameQ: string,
+  pathQ: string,
+  userIgnored: ((path: string) => boolean) | null,
+): TreeNode | null {
   if (isFile(node)) {
+    if (userIgnored && userIgnored(node.path)) return null;
     const nameOk = !nameQ || node.name.toLowerCase().includes(nameQ);
     const pathOk = !pathQ || node.path.toLowerCase().includes(pathQ);
     return nameOk && pathOk ? node : null;
   }
+  if (userIgnored && node.path && userIgnored(node.path + '/')) return null;
   const dirPathOk = !pathQ || node.path.toLowerCase().includes(pathQ);
   const kept: TreeNode[] = [];
   for (const child of node.children) {
-    const k = applyFilters(child, nameQ, dirPathOk ? '' : pathQ);
+    const k = applyFilters(child, nameQ, dirPathOk ? '' : pathQ, userIgnored);
     if (k) kept.push(k);
   }
   if (kept.length === 0) return null;
