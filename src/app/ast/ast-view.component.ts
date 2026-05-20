@@ -10,13 +10,17 @@ import { RouterLink } from '@angular/router';
 import { AnalysisStore } from '../core/state/analysis.store';
 import { AstNode, ComplexityService } from '../core/services/complexity.service';
 import { detectLanguage } from '../core/languages';
+import { AstSelectionService } from './ast-selection.service';
+import { SourcePanelComponent } from './source-panel.component';
+import { CallGraphComponent } from './call-graph.component';
+import { isCallGraphSupported } from '../core/services/call-graph';
 
 type LoadState =
   | { kind: 'idle' }
   | { kind: 'loading'; path: string }
   | { kind: 'unsupported'; path: string; language: string | null }
   | { kind: 'error'; path: string; message: string }
-  | { kind: 'ready'; path: string; language: string; root: AstNode };
+  | { kind: 'ready'; path: string; language: string; languageId: string; root: AstNode; text: string };
 
 @Component({
   selector: 'loco-ast-node',
@@ -24,8 +28,8 @@ type LoadState =
   imports: [],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="row" (click)="toggle()" [class.has-children]="hasChildren()">
-      <span class="chev">{{ hasChildren() ? (expanded() ? '▾' : '▸') : '·' }}</span>
+    <div class="row" (click)="onClick($event)" [class.has-children]="hasChildren()">
+      <span class="chev" (click)="toggle($event)">{{ hasChildren() ? (expanded() ? '▾' : '▸') : '·' }}</span>
       <span class="type">{{ node.type }}</span>
       <span class="pos">{{ node.startRow + 1 }}:{{ node.startCol + 1 }}</span>
       @if (node.preview) {
@@ -100,6 +104,8 @@ type LoadState =
   ],
 })
 export class AstNodeComponent {
+  private readonly selection = inject(AstSelectionService);
+
   @Input({ required: true }) node!: AstNode;
   @Input() depth = 0;
 
@@ -110,15 +116,25 @@ export class AstNodeComponent {
     return this.node.children.length > 0;
   }
 
-  toggle(): void {
+  toggle(ev: Event): void {
+    ev.stopPropagation();
     if (this.hasChildren()) this._expanded.update((v) => !v);
+  }
+
+  onClick(_ev: Event): void {
+    this.selection.setRange({
+      startRow: this.node.startRow,
+      startCol: this.node.startCol,
+      endRow: this.node.endRow,
+      endCol: this.node.endCol,
+    });
   }
 }
 
 @Component({
   selector: 'loco-ast-view',
   standalone: true,
-  imports: [AstNodeComponent, RouterLink],
+  imports: [AstNodeComponent, RouterLink, SourcePanelComponent, CallGraphComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @switch (state().kind) {
@@ -155,11 +171,37 @@ export class AstNodeComponent {
         <header class="head">
           <span class="path">{{ stateReadyPath() }}</span>
           <span class="lang">{{ stateReadyLang() }}</span>
+          <div class="modes">
+            <button
+              type="button"
+              class="mode"
+              [class.active]="mode() === 'tree'"
+              (click)="mode.set('tree')"
+            >Tree</button>
+            <button
+              type="button"
+              class="mode"
+              [class.active]="mode() === 'calls'"
+              [disabled]="!callsSupported()"
+              (click)="mode.set('calls')"
+              [title]="callsSupported() ? 'Function call graph' : 'Call graph only available for TS/JS'"
+            >Calls</button>
+          </div>
+          <span class="caption">{{ mode() === 'tree' ? 'Click an AST node to jump to source.' : 'Click a function to jump to source.' }}</span>
         </header>
-        <div class="ast-scroll">
-          @if (stateReadyRoot(); as root) {
-            <loco-ast-node [node]="root" />
+        <div class="split">
+          @if (mode() === 'tree') {
+            <div class="ast-scroll">
+              @if (stateReadyRoot(); as root) {
+                <loco-ast-node [node]="root" />
+              }
+            </div>
+          } @else {
+            <div class="ast-scroll">
+              <loco-call-graph [ast]="stateReadyRoot()" [languageId]="stateReadyLangId()" />
+            </div>
           }
+          <loco-source-panel [text]="stateReadyText()" />
         </div>
       }
     }
@@ -190,10 +232,52 @@ export class AstNodeComponent {
         opacity: 0.6;
         font-size: 11px;
       }
-      .ast-scroll {
+      .split {
         flex: 1;
+        display: grid;
+        grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.2fr);
+        min-height: 0;
+      }
+      .ast-scroll {
         overflow: auto;
         padding: 8px 12px;
+        border-right: 1px solid var(--border);
+        min-height: 0;
+      }
+      .spacer {
+        flex: 1;
+      }
+      .caption {
+        opacity: 0.6;
+        font-size: 11px;
+        margin-left: auto;
+      }
+      .modes {
+        display: flex;
+        gap: 2px;
+        margin-left: 12px;
+      }
+      .mode {
+        background: transparent;
+        border: 1px solid var(--border);
+        color: inherit;
+        padding: 3px 10px;
+        font-size: 11px;
+        cursor: pointer;
+        font-family: inherit;
+        border-radius: 3px;
+      }
+      .mode:hover:not(:disabled) {
+        background: var(--hover);
+      }
+      .mode.active {
+        background: var(--accent);
+        color: var(--accent-fg);
+        border-color: var(--accent);
+      }
+      .mode:disabled {
+        opacity: 0.4;
+        cursor: default;
       }
       .placeholder {
         flex: 1;
@@ -227,6 +311,7 @@ export class AstNodeComponent {
 export class AstViewComponent {
   readonly store = inject(AnalysisStore);
   private readonly complexity = inject(ComplexityService);
+  private readonly selection = inject(AstSelectionService);
 
   readonly state = signal<LoadState>({ kind: 'idle' });
 
@@ -234,6 +319,7 @@ export class AstViewComponent {
     effect(() => {
       const path = this.store.selectedPath();
       const blobs = this.store.fileBlobs();
+      this.selection.setRange(null);
       if (!path) {
         this.state.set({ kind: 'idle' });
         return;
@@ -265,7 +351,7 @@ export class AstViewComponent {
         });
         return;
       }
-      this.state.set({ kind: 'ready', path, language: lang.name, root });
+      this.state.set({ kind: 'ready', path, language: lang.name, languageId: lang.id, root, text });
     } catch (e) {
       this.state.set({
         kind: 'error',
@@ -273,6 +359,22 @@ export class AstViewComponent {
         message: e instanceof Error ? e.message : 'Parse failed.',
       });
     }
+  }
+
+  stateReadyText(): string {
+    const s = this.state();
+    return s.kind === 'ready' ? s.text : '';
+  }
+  stateReadyLangId(): string | null {
+    const s = this.state();
+    return s.kind === 'ready' ? s.languageId : null;
+  }
+
+  readonly mode = signal<'tree' | 'calls'>('tree');
+
+  callsSupported(): boolean {
+    const id = this.stateReadyLangId();
+    return isCallGraphSupported(id);
   }
 
   stateLoadingPath(): string {

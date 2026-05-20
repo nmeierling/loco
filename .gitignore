@@ -39,6 +39,15 @@ testem.log
 /typings
 __screenshots__/
 
+# Playwright
+/test-results
+/playwright-report
+/blob-report
+/playwright/.cache
+
+# Generated assets (re-created by `npm install` via copy-grammars.mjs)
+/public/grammars
+
 # System files
 .DS_Store
 Thumbs.db

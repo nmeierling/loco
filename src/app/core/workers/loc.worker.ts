@@ -21,7 +21,7 @@ export interface CountResponse {
 const BRANCH_PATTERN =
   /\b(if|else\s+if|elif|for|foreach|while|case|when|catch|except|switch|select|try)\b|\?\.|\?\?|&&|\|\||\?\s*[^.:?]/g;
 
-function countLoc(req: CountRequest): CountResponse {
+export function countLoc(req: CountRequest): CountResponse {
   const { text, lineComment, blockComment } = req;
   let loc = 0;
   let blank = 0;
