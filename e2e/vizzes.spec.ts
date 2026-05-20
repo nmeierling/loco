@@ -29,6 +29,31 @@ test.describe('Alternative vizzes (sunburst, module graph, dep matrix)', () => {
     await expect(page.locator('loco-ast-view loco-ast-node').first()).toBeVisible();
   });
 
+  test('module graph shows a minimap; clicking it pans the main view', async ({ page }) => {
+    await loadLocoSrc(page);
+    await selectViz(page, 'Module graph');
+    await page.waitForSelector('loco-module-graph svg circle');
+    const minimap = page.locator('loco-module-graph svg.minimap');
+    await expect(minimap).toBeVisible();
+    await expect(minimap.locator('rect.vp')).toBeVisible();
+    const beforeTransform = await page.$eval(
+      'loco-module-graph svg g[transform^="translate"]',
+      (el) => el.getAttribute('transform') ?? '',
+    );
+
+    // Click on a corner of the minimap to pan
+    const box = await minimap.boundingBox();
+    if (!box) throw new Error('minimap not visible');
+    await page.mouse.click(box.x + 20, box.y + 20);
+    await page.waitForTimeout(120);
+
+    const afterTransform = await page.$eval(
+      'loco-module-graph svg g[transform^="translate"]',
+      (el) => el.getAttribute('transform') ?? '',
+    );
+    expect(afterTransform).not.toBe(beforeTransform);
+  });
+
   test('dep matrix builds and renders a square grid of cells', async ({ page }) => {
     await loadLocoSrc(page);
     await selectViz(page, 'Dep matrix');

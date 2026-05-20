@@ -85,6 +85,20 @@ export function extractImports(ast: AstNode, languageId: string): RawImport[] {
       });
       break;
     }
+    case 'java': {
+      visit(ast, (n) => {
+        if (n.type === 'import_declaration') {
+          // preview looks like: 'import com.example.Foo;', 'import static com.example.Utils.bar;',
+          // or 'import com.example.foo.*;'. Static imports point at a class member; the dotted
+          // path still includes the enclosing class, so the same walk-up resolver handles them.
+          const m = n.preview.match(
+            /^\s*import\s+(?:static\s+)?(\w+(?:\.\w+)*)(\.\*)?\s*;?/,
+          );
+          if (m && m[1] && !m[2]) push(m[1]);
+        }
+      });
+      break;
+    }
     case 'py': {
       visit(ast, (n) => {
         if (n.type === 'import_statement') {
@@ -120,13 +134,42 @@ export function extractImports(ast: AstNode, languageId: string): RawImport[] {
   return out;
 }
 
-/** Returns the package declaration of a file, if the language has one (Kotlin today). */
+const JVM_LANGS = new Set(['kt', 'kts', 'java']);
+
+const JVM_PACKAGE_NODES = new Set([
+  // Kotlin
+  'package_header',
+  // Java
+  'package_declaration',
+]);
+
+const JVM_TOP_LEVEL_DECL_NODES = new Set([
+  // Kotlin
+  'class_declaration',
+  'object_declaration',
+  'function_declaration',
+  'property_declaration',
+  'type_alias',
+  // Java
+  'interface_declaration',
+  'enum_declaration',
+  'annotation_type_declaration',
+  'record_declaration',
+]);
+
+const JVM_IDENTIFIER_NODES = new Set([
+  'identifier',
+  'type_identifier',
+  'simple_identifier',
+]);
+
+/** Returns the package declaration of a file, if the language has one (Kotlin + Java today). */
 export function extractPackage(ast: AstNode, languageId: string): string | null {
-  if (languageId !== 'kt' && languageId !== 'kts') return null;
+  if (!JVM_LANGS.has(languageId)) return null;
   let found: string | null = null;
   walk(ast, (n) => {
     if (found) return true;
-    if (n.type === 'package_header') {
+    if (JVM_PACKAGE_NODES.has(n.type)) {
       const m = n.preview.match(/^\s*package\s+(\w+(?:\.\w+)*)/);
       if (m) found = m[1];
       return true;
@@ -137,28 +180,16 @@ export function extractPackage(ast: AstNode, languageId: string): string | null 
 }
 
 /**
- * Top-level declaration names (classes/objects/interfaces/top-level fns) for a Kotlin file.
+ * Top-level declaration names (classes/objects/interfaces/top-level fns/records/etc.).
  * Used to populate the package index for cross-file import resolution.
  */
 export function extractTopLevelDeclarations(ast: AstNode, languageId: string): string[] {
-  if (languageId !== 'kt' && languageId !== 'kts') return [];
+  if (!JVM_LANGS.has(languageId)) return [];
   const out: string[] = [];
   for (const c of ast.children) {
-    if (
-      c.type !== 'class_declaration' &&
-      c.type !== 'object_declaration' &&
-      c.type !== 'function_declaration' &&
-      c.type !== 'property_declaration' &&
-      c.type !== 'type_alias'
-    ) {
-      continue;
-    }
+    if (!JVM_TOP_LEVEL_DECL_NODES.has(c.type)) continue;
     for (const cc of c.children) {
-      if (
-        cc.type === 'identifier' ||
-        cc.type === 'type_identifier' ||
-        cc.type === 'simple_identifier'
-      ) {
+      if (JVM_IDENTIFIER_NODES.has(cc.type)) {
         if (cc.preview) out.push(cc.preview);
         break;
       }

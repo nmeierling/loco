@@ -4,9 +4,9 @@ import { ComplexityService } from './complexity.service';
 import { detectLanguage } from '../languages';
 import { walk } from '../models/tree';
 import { extractImports, extractPackage, extractTopLevelDeclarations } from './imports';
-import { KotlinResolveContext, resolveKotlin, resolveSpecifier } from './module-resolve';
+import { JvmResolveContext, resolveJvm, resolveSpecifier } from './module-resolve';
 
-const KOTLIN_LANGS = new Set(['kt', 'kts']);
+const JVM_LANGS = new Set(['kt', 'kts', 'java']);
 
 export interface GraphNode {
   path: string;
@@ -105,7 +105,7 @@ export class ModuleGraphService {
         if (ast) {
           const specs = extractImports(ast, langId).map((i) => i.specifier);
           if (specs.length > 0) importsByPath.set(path, specs);
-          if (KOTLIN_LANGS.has(langId)) {
+          if (JVM_LANGS.has(langId)) {
             const pkg = extractPackage(ast, langId);
             if (pkg) packageByPath.set(path, pkg);
             const decls = extractTopLevelDeclarations(ast, langId);
@@ -123,7 +123,7 @@ export class ModuleGraphService {
     }
 
     // Build Kotlin package indices once for the whole repo
-    const kotlinCtx: KotlinResolveContext = buildKotlinContext(packageByPath, declsByPath);
+    const jvmCtx: JvmResolveContext = buildJvmContext(packageByPath, declsByPath);
 
     // Build name → path index for absolute Python-like imports
     const allFiles = new Set<string>();
@@ -152,14 +152,14 @@ export class ModuleGraphService {
       const langId = langByPath.get(from) ?? 'ts';
       for (const spec of specs) {
         let resolved: string | null;
-        if (KOTLIN_LANGS.has(langId)) {
-          resolved = resolveKotlin(spec, kotlinCtx);
+        if (JVM_LANGS.has(langId)) {
+          resolved = resolveJvm(spec, jvmCtx);
         } else {
           resolved = resolveSpecifier(spec, from, langId, allFiles);
         }
         if (resolved) {
           addEdge(from, resolved);
-        } else if (KOTLIN_LANGS.has(langId)) {
+        } else if (JVM_LANGS.has(langId)) {
           // Kotlin imports are absolute. Treat unresolved Kotlin imports as external
           // (standard library, kotlin.*, java.*, third-party) — not a bug in our walker.
           externalCount++;
@@ -215,18 +215,18 @@ export class ModuleGraphService {
 }
 
 /**
- * Builds the indices that {@link resolveKotlin} needs: one mapping fully-qualified
+ * Builds the indices that {@link resolveJvm} needs: one mapping fully-qualified
  * class/object/function names to their file paths, and one mapping package names
  * to the list of files declaring members in that package.
  *
  * Both the explicit declarations (from `extractTopLevelDeclarations`) and the file
- * stem are used as candidate names — Kotlin convention is `Foo.kt` declares `Foo`,
- * but multi-declaration files (`Models.kt`) need the explicit list too.
+ * stem are used as candidate names — the JVM convention is `Foo.kt`/`Foo.java`
+ * declares `Foo`, but multi-declaration files need the explicit list too.
  */
-export function buildKotlinContext(
+export function buildJvmContext(
   packageByPath: ReadonlyMap<string, string>,
   declsByPath: ReadonlyMap<string, readonly string[]>,
-): KotlinResolveContext {
+): JvmResolveContext {
   const pkgIndex = new Map<string, string>();
   const pkgFiles = new Map<string, string[]>();
 

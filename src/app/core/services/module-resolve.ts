@@ -1,7 +1,7 @@
 const JS_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.json'] as const;
 const PY_EXTENSIONS = ['.py'] as const;
 
-export interface KotlinResolveContext {
+export interface JvmResolveContext {
   /** Fully-qualified name (`com.example.Foo`) → file path. Built from package + top-level declarations. */
   pkgIndex: ReadonlyMap<string, string>;
   /** Package name (`com.example`) → file paths in that package. Lets us resolve top-level functions. */
@@ -9,11 +9,12 @@ export interface KotlinResolveContext {
 }
 
 /**
- * Resolves a Kotlin import specifier. Walks the dotted path from deepest to shallowest
- * looking for an indexed class; falls back to matching the parent package when it
- * contains exactly one file (typical for top-level function imports).
+ * Resolves a JVM-language import specifier (Kotlin or Java). Walks the dotted path
+ * from deepest to shallowest looking for an indexed class; falls back to matching the
+ * parent package when it contains exactly one file (typical for top-level function
+ * imports in Kotlin or static-member imports in Java).
  */
-export function resolveKotlin(spec: string, ctx: KotlinResolveContext): string | null {
+export function resolveJvm(spec: string, ctx: JvmResolveContext): string | null {
   let cur = spec;
   while (cur.length > 0) {
     const hit = ctx.pkgIndex.get(cur);

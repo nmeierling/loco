@@ -150,6 +150,39 @@ interface RenderLink {
             </marker>
           </defs>
         </svg>
+
+        @if (minimap(); as mm) {
+          <svg
+            class="minimap"
+            [attr.width]="mm.w"
+            [attr.height]="mm.h"
+            (mousedown)="onMinimapDown($event)"
+          >
+            <rect width="100%" height="100%" rx="4" fill="var(--bar-bg)" stroke="var(--border)" />
+            <g [attr.transform]="'translate(' + mm.offX + ',' + mm.offY + ')'">
+              @for (mn of mm.nodes; track mn.id) {
+                <circle
+                  [attr.cx]="mn.x"
+                  [attr.cy]="mn.y"
+                  [attr.r]="mn.r"
+                  [attr.fill]="mn.fill"
+                  fill-opacity="0.7"
+                />
+              }
+            </g>
+            <rect
+              class="vp"
+              [attr.x]="mm.vpX"
+              [attr.y]="mm.vpY"
+              [attr.width]="mm.vpW"
+              [attr.height]="mm.vpH"
+              fill="rgba(0,0,0,0)"
+              stroke="var(--accent)"
+              stroke-width="1.2"
+              pointer-events="none"
+            />
+          </svg>
+        }
       }
 
       @if (hovered(); as h) {
@@ -255,6 +288,18 @@ interface RenderLink {
         opacity: 0.55;
         pointer-events: none;
       }
+      .minimap {
+        position: absolute;
+        right: 10px;
+        bottom: 10px;
+        border-radius: 4px;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+        cursor: pointer;
+        z-index: 9;
+      }
+      .minimap:hover .vp {
+        stroke-width: 1.6;
+      }
     `,
   ],
 })
@@ -285,6 +330,67 @@ export class ModuleGraphComponent implements AfterViewInit {
     return this.nodes().find((n) => n.id === id) ?? null;
   });
   readonly tipPos = signal<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  private readonly MINIMAP_W = 200;
+  private readonly MINIMAP_H = 140;
+  private readonly MINIMAP_PAD = 8;
+
+  readonly minimap = computed(() => {
+    const ns = this.nodes();
+    const w = this.width();
+    const h = this.height();
+    if (ns.length === 0 || w === 0 || h === 0) return null;
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const n of ns) {
+      if (n.cx < minX) minX = n.cx;
+      if (n.cy < minY) minY = n.cy;
+      if (n.cx > maxX) maxX = n.cx;
+      if (n.cy > maxY) maxY = n.cy;
+    }
+    // Include current viewport in the bounds so the rectangle never escapes the minimap.
+    const z = this.zoom();
+    const tx = this.tx();
+    const ty = this.ty();
+    const gx0 = -tx / z;
+    const gy0 = -ty / z;
+    const gx1 = gx0 + w / z;
+    const gy1 = gy0 + h / z;
+    if (gx0 < minX) minX = gx0;
+    if (gy0 < minY) minY = gy0;
+    if (gx1 > maxX) maxX = gx1;
+    if (gy1 > maxY) maxY = gy1;
+
+    const gw = Math.max(1, maxX - minX);
+    const gh = Math.max(1, maxY - minY);
+    const innerW = this.MINIMAP_W - 2 * this.MINIMAP_PAD;
+    const innerH = this.MINIMAP_H - 2 * this.MINIMAP_PAD;
+    const scale = Math.min(innerW / gw, innerH / gh);
+    const offX = this.MINIMAP_PAD - minX * scale;
+    const offY = this.MINIMAP_PAD - minY * scale;
+
+    return {
+      w: this.MINIMAP_W,
+      h: this.MINIMAP_H,
+      offX,
+      offY,
+      scale,
+      nodes: ns.map((n) => ({
+        id: n.id,
+        x: n.cx * scale,
+        y: n.cy * scale,
+        r: Math.max(1, n.r * scale * 0.6),
+        fill: n.color,
+      })),
+      vpX: gx0 * scale + offX,
+      vpY: gy0 * scale + offY,
+      vpW: (w / z) * scale,
+      vpH: (h / z) * scale,
+    };
+  });
 
   private simulation: Simulation<SimNode, SimLink> | null = null;
   private simNodes: SimNode[] = [];
@@ -462,6 +568,32 @@ export class ModuleGraphComponent implements AfterViewInit {
     this.tx.set(mx - ((mx - this.tx()) * z1) / z0);
     this.ty.set(my - ((my - this.ty()) * z1) / z0);
     this.zoom.set(z1);
+  }
+
+  onMinimapDown(ev: MouseEvent): void {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const svg = ev.currentTarget as SVGSVGElement;
+    const center = (e: MouseEvent) => {
+      const mm = this.minimap();
+      if (!mm) return;
+      const rect = svg.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const gx = (mx - mm.offX) / mm.scale;
+      const gy = (my - mm.offY) / mm.scale;
+      const z = this.zoom();
+      this.tx.set(this.width() / 2 - gx * z);
+      this.ty.set(this.height() / 2 - gy * z);
+    };
+    center(ev);
+    const onMove = (e: MouseEvent) => center(e);
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
   }
 
   onPanStart(ev: MouseEvent): void {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { extractImports, extractPackage, extractTopLevelDeclarations } from './imports';
-import { resolveKotlin, KotlinResolveContext } from './module-resolve';
-import { buildKotlinContext } from './module-graph.service';
+import { resolveJvm, JvmResolveContext } from './module-resolve';
+import { buildJvmContext } from './module-graph.service';
 import type { AstNode } from './complexity.service';
 
 function n(type: string, preview: string, children: AstNode[] = []): AstNode {
@@ -76,6 +76,63 @@ describe('extractPackage — Kotlin', () => {
   });
 });
 
+describe('extractImports — Java', () => {
+  it('extracts a simple class import (with trailing semicolon)', () => {
+    const ast = n('program', '', [
+      n('import_declaration', 'import com.example.Foo;'),
+    ]);
+    expect(extractImports(ast, 'java')).toEqual([
+      { specifier: 'com.example.Foo', relative: false },
+    ]);
+  });
+
+  it('extracts a static import (the dotted path still leads to the enclosing class)', () => {
+    const ast = n('program', '', [
+      n('import_declaration', 'import static com.example.Utils.parseInt;'),
+    ]);
+    expect(extractImports(ast, 'java')).toEqual([
+      { specifier: 'com.example.Utils.parseInt', relative: false },
+    ]);
+  });
+
+  it('skips wildcard imports', () => {
+    const ast = n('program', '', [
+      n('import_declaration', 'import com.example.*;'),
+      n('import_declaration', 'import static com.example.Utils.*;'),
+    ]);
+    expect(extractImports(ast, 'java')).toEqual([]);
+  });
+});
+
+describe('extractPackage — Java', () => {
+  it('handles `package x.y.z;` with trailing semicolon', () => {
+    const ast = n('program', '', [
+      n('package_declaration', 'package com.example.foo;'),
+      n('import_declaration', 'import x.Y;'),
+    ]);
+    expect(extractPackage(ast, 'java')).toBe('com.example.foo');
+  });
+});
+
+describe('extractTopLevelDeclarations — Java', () => {
+  it('captures interface, enum, record, annotation, class names', () => {
+    const ast = n('program', '', [
+      n('class_declaration', '', [n('identifier', 'Foo')]),
+      n('interface_declaration', '', [n('identifier', 'Bar')]),
+      n('enum_declaration', '', [n('identifier', 'Color')]),
+      n('annotation_type_declaration', '', [n('identifier', 'Marker')]),
+      n('record_declaration', '', [n('identifier', 'Point')]),
+    ]);
+    expect(extractTopLevelDeclarations(ast, 'java')).toEqual([
+      'Foo',
+      'Bar',
+      'Color',
+      'Marker',
+      'Point',
+    ]);
+  });
+});
+
 describe('extractTopLevelDeclarations — Kotlin', () => {
   it('captures class, object, function names and a property', () => {
     const ast = n('source_file', '', [
@@ -88,7 +145,7 @@ describe('extractTopLevelDeclarations — Kotlin', () => {
   });
 });
 
-describe('buildKotlinContext + resolveKotlin', () => {
+describe('buildJvmContext + resolveJvm', () => {
   // Mirrors a typical project: a few files, two of them in the same package
   // with multiple top-level declarations (so the file stem isn't enough).
   const packageByPath = new Map<string, string>([
@@ -102,33 +159,33 @@ describe('buildKotlinContext + resolveKotlin', () => {
     ['src/main/kotlin/com/example/util/Utils.kt', ['parseInt', 'parseFloat']],
   ]);
 
-  const ctx: KotlinResolveContext = buildKotlinContext(packageByPath, declsByPath);
+  const ctx: JvmResolveContext = buildJvmContext(packageByPath, declsByPath);
 
   it('resolves a class by its file stem (Bar.kt declares Bar)', () => {
-    expect(resolveKotlin('com.example.foo.Bar', ctx)).toBe(
+    expect(resolveJvm('com.example.foo.Bar', ctx)).toBe(
       'src/main/kotlin/com/example/foo/Bar.kt',
     );
   });
 
   it('resolves a class declared in a multi-class file (UserModel in Models.kt)', () => {
-    expect(resolveKotlin('com.example.foo.UserModel', ctx)).toBe(
+    expect(resolveJvm('com.example.foo.UserModel', ctx)).toBe(
       'src/main/kotlin/com/example/foo/Models.kt',
     );
   });
 
   it('resolves a nested class by walking up the dotted path', () => {
-    expect(resolveKotlin('com.example.foo.Bar.Nested', ctx)).toBe(
+    expect(resolveJvm('com.example.foo.Bar.Nested', ctx)).toBe(
       'src/main/kotlin/com/example/foo/Bar.kt',
     );
   });
 
   it('resolves a top-level function via single-file-in-package fallback', () => {
-    expect(resolveKotlin('com.example.util.parseInt', ctx)).toBe(
+    expect(resolveJvm('com.example.util.parseInt', ctx)).toBe(
       'src/main/kotlin/com/example/util/Utils.kt',
     );
   });
 
   it('returns null for an import targeting an unknown package', () => {
-    expect(resolveKotlin('kotlin.collections.List', ctx)).toBeNull();
+    expect(resolveJvm('kotlin.collections.List', ctx)).toBeNull();
   });
 });
