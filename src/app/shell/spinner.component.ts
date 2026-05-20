@@ -14,7 +14,11 @@ import { AnalysisStore } from '../core/state/analysis.store';
             <div class="line">{{ headline() }}</div>
             @if (progressText(); as p) {
               <div class="sub">{{ p }}</div>
+            }
+            @if (progressPct() !== null) {
               <div class="bar"><div class="fill" [style.width.%]="progressPct()"></div></div>
+            } @else if (visible()) {
+              <div class="bar indeterminate"><div class="fill-indet"></div></div>
             }
           </div>
         </div>
@@ -87,10 +91,28 @@ import { AnalysisStore } from '../core/state/analysis.store';
         background: var(--accent);
         transition: width 0.15s ease-out;
       }
+      .bar.indeterminate {
+        position: relative;
+        overflow: hidden;
+      }
+      .fill-indet {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: -40%;
+        width: 40%;
+        background: var(--accent);
+        border-radius: 2px;
+        animation: indet 1.1s linear infinite;
+      }
       @keyframes spin {
         to {
           transform: rotate(360deg);
         }
+      }
+      @keyframes indet {
+        from { left: -40%; }
+        to { left: 100%; }
       }
     `,
   ],
@@ -102,12 +124,14 @@ export class SpinnerComponent {
 
   readonly visible = computed(() => {
     const p = this.status().phase;
-    return p === 'loading' || p === 'counting' || p === 'parsing';
+    return p === 'reading' || p === 'loading' || p === 'counting' || p === 'parsing';
   });
 
   readonly headline = computed(() => {
     const s = this.status();
     switch (s.phase) {
+      case 'reading':
+        return 'Reading folder…';
       case 'loading':
         return s.message;
       case 'counting':
@@ -121,12 +145,18 @@ export class SpinnerComponent {
 
   readonly progressText = computed(() => {
     const s = this.status();
+    if (s.phase === 'reading') {
+      if (s.done === 0) return null;
+      const n = s.done.toLocaleString();
+      return `${n} ${s.done === 1 ? 'file' : 'files'} discovered`;
+    }
     if (s.phase !== 'counting' && s.phase !== 'parsing') return null;
     return `${s.done.toLocaleString()} / ${s.total.toLocaleString()}`;
   });
 
   readonly progressPct = computed(() => {
     const s = this.status();
+    if (s.phase === 'reading') return null;
     if ((s.phase !== 'counting' && s.phase !== 'parsing') || s.total === 0) return 0;
     return Math.min(100, Math.round((s.done / s.total) * 100));
   });

@@ -64,7 +64,13 @@ const STORAGE_KEY = 'loco.panels.v1';
 
     @if (!store.root()) {
       <section class="welcome">
-        <loco-drop-zone (loaded)="onLoaded($event)" (error)="onError($event)" />
+        <loco-drop-zone
+          (started)="onReadingStarted()"
+          (progress)="onReadingProgress($event)"
+          (loaded)="onLoaded($event)"
+          (error)="onError($event)"
+          (canceled)="onPickerCanceled()"
+        />
         @if (errorMessage()) {
           <div class="err">{{ errorMessage() }}</div>
         }
@@ -366,6 +372,8 @@ export class ShellComponent {
   readonly statusLine = computed(() => {
     const s = this.store.status();
     switch (s.phase) {
+      case 'reading':
+        return `Reading ${s.done.toLocaleString()} files…`;
       case 'loading':
         return s.message;
       case 'counting':
@@ -378,6 +386,22 @@ export class ShellComponent {
         return null;
     }
   });
+
+  onReadingStarted(): void {
+    this.errorMessage.set(null);
+    this.store.status.set({ phase: 'reading', done: 0 });
+  }
+
+  onReadingProgress(done: number): void {
+    this.store.status.set({ phase: 'reading', done });
+  }
+
+  onPickerCanceled(): void {
+    // User dismissed the OS picker; rewind the spinner.
+    if (this.store.status().phase === 'reading') {
+      this.store.status.set({ phase: 'idle' });
+    }
+  }
 
   constructor() {
     effect(() => {

@@ -1,6 +1,17 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Output, inject, signal } from '@angular/core';
 import { DirectoryLoaderService, LoadResult } from '../core/services/directory-loader.service';
 
+/** Yields to the browser long enough that the next paint actually flushes pending DOM changes. */
+function nextPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => resolve());
+    } else {
+      setTimeout(resolve, 0);
+    }
+  });
+}
+
 @Component({
   selector: 'loco-drop-zone',
   standalone: true,
@@ -29,6 +40,7 @@ import { DirectoryLoaderService, LoadResult } from '../core/services/directory-l
         multiple
         hidden
         (change)="onInput($event)"
+        (cancel)="onPickerCanceled()"
       />
     </div>
   `,
@@ -78,9 +90,14 @@ export class DropZoneComponent {
   private readonly loader = inject(DirectoryLoaderService);
   readonly hasFsApi = this.loader.hasFsAccessApi();
   readonly dragOver = signal(false);
+  /** True while a picker dialog is open via this component, so onInput knows the started event already fired. */
+  private pickerInFlight = false;
 
   @Output() loaded = new EventEmitter<LoadResult>();
   @Output() error = new EventEmitter<string>();
+  @Output() started = new EventEmitter<void>();
+  @Output() progress = new EventEmitter<number>();
+  @Output() canceled = new EventEmitter<void>();
 
   onDragEnter(ev: DragEvent): void {
     ev.preventDefault();
@@ -98,35 +115,79 @@ export class DropZoneComponent {
   async onDrop(ev: DragEvent): Promise<void> {
     ev.preventDefault();
     this.dragOver.set(false);
+    this.started.emit();
+    // Kick off the load synchronously so the user-activation context from the drop event
+    // reaches getAsFileSystemHandle() before any await consumes it.
+    const loadPromise = this.loader.loadFromDrop(ev, (n) => this.progress.emit(n));
+    // Now safe to yield a paint frame so the spinner actually flushes to the screen.
+    await nextPaint();
     try {
-      const result = await this.loader.loadFromDrop(ev);
+      const result = await loadPromise;
       if (result) this.loaded.emit(result);
-      else this.error.emit('No directory found in the drop. Drop a folder, not files.');
+      else {
+        this.canceled.emit();
+        this.error.emit('No directory found in the drop. Drop a folder, not files.');
+      }
     } catch (e) {
+      this.canceled.emit();
       this.error.emit(e instanceof Error ? e.message : 'Failed to load directory.');
     }
   }
 
   async openPicker(): Promise<void> {
-    try {
-      if (this.hasFsApi) {
-        const result = await this.loader.pickDirectory();
+    // Flip the spinner BEFORE the OS dialog opens so the user sees it as soon as
+    // they pick — even if the browser then spends seconds indexing the folder
+    // (webkitdirectory path) before firing the change event.
+    this.pickerInFlight = true;
+    this.started.emit();
+
+    if (this.hasFsApi) {
+      // IMPORTANT: open the picker synchronously after the click handler — awaiting
+      // before calling it would burn the user-activation token and showDirectoryPicker
+      // would throw with NotAllowedError on user-gesture-required browsers.
+      const pickerPromise = this.loader.pickDirectory((n) => this.progress.emit(n));
+      // Picker dialog is now open; safe to yield a paint frame.
+      await nextPaint();
+      try {
+        const result = await pickerPromise;
+        this.pickerInFlight = false;
         if (result) this.loaded.emit(result);
-        return;
+        else this.canceled.emit();
+      } catch (e) {
+        this.pickerInFlight = false;
+        const msg = e instanceof Error ? e.message : String(e);
+        this.canceled.emit();
+        if (!/AbortError|user activation/i.test(msg)) this.error.emit(msg);
       }
-      const input = document.querySelector<HTMLInputElement>('loco-drop-zone input[type="file"]');
-      input?.click();
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Failed to open folder picker.';
-      if (!/AbortError|user activation/i.test(msg)) this.error.emit(msg);
+      return;
     }
+
+    // webkitdirectory fallback — open the file dialog synchronously. We wait for
+    // (change)/(cancel) on the input element to advance the flow.
+    const input = document.querySelector<HTMLInputElement>('loco-drop-zone input[type="file"]');
+    input?.click();
   }
 
   async onInput(ev: Event): Promise<void> {
     const input = ev.target as HTMLInputElement;
-    if (!input.files || input.files.length === 0) return;
-    const result = await this.loader.loadFromInput(input.files);
+    const startedAlready = this.pickerInFlight;
+    this.pickerInFlight = false;
+    if (!input.files || input.files.length === 0) {
+      this.canceled.emit();
+      return;
+    }
+    if (!startedAlready) {
+      this.started.emit();
+      await nextPaint();
+    }
+    const result = await this.loader.loadFromInput(input.files, (n) => this.progress.emit(n));
     this.loaded.emit(result);
     input.value = '';
+  }
+
+  onPickerCanceled(): void {
+    if (!this.pickerInFlight) return;
+    this.pickerInFlight = false;
+    this.canceled.emit();
   }
 }

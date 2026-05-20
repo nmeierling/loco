@@ -10,6 +10,8 @@ export interface LoadResult {
   files: LoadedFile[];
 }
 
+export type ProgressCallback = (count: number) => void;
+
 interface FSDirHandle {
   kind: 'directory';
   name: string;
@@ -47,20 +49,22 @@ const isDirHandle = (h: AnyFSHandle): h is FSDirHandle => h.kind === 'directory'
 const isFileEntry = (e: FSEntry): e is FSFileEntry => e.isFile;
 const isDirEntry = (e: FSEntry): e is FSDirEntry => e.isDirectory;
 
+const PROGRESS_BATCH = 50;
+
 @Injectable({ providedIn: 'root' })
 export class DirectoryLoaderService {
   hasFsAccessApi(): boolean {
     return typeof (window as unknown as PickerWindow).showDirectoryPicker === 'function';
   }
 
-  async pickDirectory(): Promise<LoadResult | null> {
+  async pickDirectory(onProgress?: ProgressCallback): Promise<LoadResult | null> {
     const picker = (window as unknown as PickerWindow).showDirectoryPicker;
     if (!picker) return null;
     const handle = await picker();
-    return this.fromDirHandle(handle);
+    return this.fromDirHandle(handle, onProgress);
   }
 
-  async loadFromInput(fileList: FileList): Promise<LoadResult> {
+  async loadFromInput(fileList: FileList, onProgress?: ProgressCallback): Promise<LoadResult> {
     const files: LoadedFile[] = [];
     let rootName = 'root';
     for (let i = 0; i < fileList.length; i++) {
@@ -71,11 +75,17 @@ export class DirectoryLoaderService {
       if (parts.length > 1 && parts[0]) rootName = parts[0];
       const path = parts.length > 1 ? parts.slice(1).join('/') : f.name;
       files.push({ path, file: f });
+      if (files.length % PROGRESS_BATCH === 0) {
+        onProgress?.(files.length);
+        // Yield so the spinner can repaint
+        await new Promise((r) => setTimeout(r, 0));
+      }
     }
+    onProgress?.(files.length);
     return { rootName, files };
   }
 
-  async loadFromDrop(event: DragEvent): Promise<LoadResult | null> {
+  async loadFromDrop(event: DragEvent, onProgress?: ProgressCallback): Promise<LoadResult | null> {
     const dt = event.dataTransfer;
     if (!dt) return null;
     const items = Array.from(dt.items) as DTItemWithHandle[];
@@ -85,7 +95,7 @@ export class DirectoryLoaderService {
       if (item.getAsFileSystemHandle) {
         const handle = await item.getAsFileSystemHandle();
         if (handle && isDirHandle(handle)) {
-          return this.fromDirHandle(handle);
+          return this.fromDirHandle(handle, onProgress);
         }
       }
     }
@@ -95,7 +105,8 @@ export class DirectoryLoaderService {
       const entry = item.webkitGetAsEntry?.() as unknown as FSEntry | null;
       if (entry && isDirEntry(entry)) {
         const files: LoadedFile[] = [];
-        await this.walkFsDirChildren(entry, '', files);
+        await this.walkFsDirChildren(entry, '', files, onProgress);
+        onProgress?.(files.length);
         return { rootName: entry.name, files };
       }
     }
@@ -103,25 +114,40 @@ export class DirectoryLoaderService {
     return null;
   }
 
-  private async fromDirHandle(handle: FSDirHandle): Promise<LoadResult> {
+  private async fromDirHandle(
+    handle: FSDirHandle,
+    onProgress?: ProgressCallback,
+  ): Promise<LoadResult> {
     const files: LoadedFile[] = [];
-    await this.walkDirHandle(handle, '', files);
+    await this.walkDirHandle(handle, '', files, onProgress);
+    onProgress?.(files.length);
     return { rootName: handle.name, files };
   }
 
-  private async walkDirHandle(dir: FSDirHandle, prefix: string, out: LoadedFile[]): Promise<void> {
+  private async walkDirHandle(
+    dir: FSDirHandle,
+    prefix: string,
+    out: LoadedFile[],
+    onProgress?: ProgressCallback,
+  ): Promise<void> {
     for await (const [name, child] of dir.entries()) {
       const childPath = prefix ? `${prefix}/${name}` : name;
       if (isDirHandle(child)) {
-        await this.walkDirHandle(child, childPath, out);
+        await this.walkDirHandle(child, childPath, out, onProgress);
       } else {
         const file = await child.getFile();
         out.push({ path: childPath, file });
+        if (out.length % PROGRESS_BATCH === 0) onProgress?.(out.length);
       }
     }
   }
 
-  private async walkFsDirChildren(dir: FSDirEntry, prefix: string, out: LoadedFile[]): Promise<void> {
+  private async walkFsDirChildren(
+    dir: FSDirEntry,
+    prefix: string,
+    out: LoadedFile[],
+    onProgress?: ProgressCallback,
+  ): Promise<void> {
     const reader = dir.createReader();
     const collected: FSEntry[] = [];
     let batch: FSEntry[] = [];
@@ -137,8 +163,9 @@ export class DirectoryLoaderService {
       if (isFileEntry(child)) {
         const file = await new Promise<File>((resolve, reject) => child.file(resolve, reject));
         out.push({ path: childPath, file });
+        if (out.length % PROGRESS_BATCH === 0) onProgress?.(out.length);
       } else if (isDirEntry(child)) {
-        await this.walkFsDirChildren(child, childPath, out);
+        await this.walkFsDirChildren(child, childPath, out, onProgress);
       }
     }
   }
