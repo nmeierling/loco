@@ -1,6 +1,36 @@
 const JS_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.json'] as const;
 const PY_EXTENSIONS = ['.py'] as const;
 
+export interface KotlinResolveContext {
+  /** Fully-qualified name (`com.example.Foo`) → file path. Built from package + top-level declarations. */
+  pkgIndex: ReadonlyMap<string, string>;
+  /** Package name (`com.example`) → file paths in that package. Lets us resolve top-level functions. */
+  pkgFiles: ReadonlyMap<string, readonly string[]>;
+}
+
+/**
+ * Resolves a Kotlin import specifier. Walks the dotted path from deepest to shallowest
+ * looking for an indexed class; falls back to matching the parent package when it
+ * contains exactly one file (typical for top-level function imports).
+ */
+export function resolveKotlin(spec: string, ctx: KotlinResolveContext): string | null {
+  let cur = spec;
+  while (cur.length > 0) {
+    const hit = ctx.pkgIndex.get(cur);
+    if (hit) return hit;
+    const dot = cur.lastIndexOf('.');
+    if (dot <= 0) break;
+    cur = cur.slice(0, dot);
+  }
+  const dot = spec.lastIndexOf('.');
+  if (dot > 0) {
+    const pkgPart = spec.slice(0, dot);
+    const files = ctx.pkgFiles.get(pkgPart);
+    if (files && files.length === 1) return files[0] ?? null;
+  }
+  return null;
+}
+
 /**
  * Resolves an import specifier to a file path within the repo, or null if external/unresolvable.
  * Pure function — exported for unit testing.

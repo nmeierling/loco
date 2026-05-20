@@ -1,13 +1,19 @@
 import { AstNode } from './complexity.service';
 
 export interface RawImport {
-  /** Raw specifier as it appears in source, e.g. './foo', '../bar', 'react'. */
+  /** Raw specifier as it appears in source, e.g. './foo', '../bar', 'react', 'com.example.Foo'. */
   specifier: string;
   /** True when the specifier is a relative path (starts with ./ or ../ or /). */
   relative: boolean;
 }
 
-/** Extracts module/package specifiers a file imports. Supports JS/TS family + Python. */
+function walk(node: AstNode, fn: (n: AstNode) => boolean | void): void {
+  const stop = fn(node);
+  if (stop === true) return;
+  for (const c of node.children) walk(c, fn);
+}
+
+/** Extracts module/package specifiers a file imports. Supports JS/TS family, Python, Kotlin. */
 export function extractImports(ast: AstNode, languageId: string): RawImport[] {
   const out: RawImport[] = [];
   const pushed = new Set<string>();
@@ -18,11 +24,7 @@ export function extractImports(ast: AstNode, languageId: string): RawImport[] {
     out.push({ specifier: s, relative: s.startsWith('./') || s.startsWith('../') || s.startsWith('/') });
   };
 
-  const visit = (node: AstNode, fn: (n: AstNode) => boolean | void): void => {
-    const stop = fn(node);
-    if (stop === true) return;
-    for (const c of node.children) visit(c, fn);
-  };
+  const visit = walk;
 
   switch (languageId) {
     case 'ts':
@@ -70,6 +72,19 @@ export function extractImports(ast: AstNode, languageId: string): RawImport[] {
       });
       break;
     }
+    case 'kt':
+    case 'kts': {
+      visit(ast, (n) => {
+        if (n.type === 'import_header') {
+          // preview looks like: 'import com.example.Foo', 'import com.example.foo.*',
+          // or 'import com.example.Foo as Bar'. Use alternation (not [\w.]+) so the
+          // dot in '.*' isn't greedily consumed by the identifier capture.
+          const m = n.preview.match(/^\s*import\s+(\w+(?:\.\w+)*)(\.\*)?(?:\s+as\s+\w+)?/);
+          if (m && m[1] && !m[2]) push(m[1]);
+        }
+      });
+      break;
+    }
     case 'py': {
       visit(ast, (n) => {
         if (n.type === 'import_statement') {
@@ -102,5 +117,52 @@ export function extractImports(ast: AstNode, languageId: string): RawImport[] {
     }
   }
 
+  return out;
+}
+
+/** Returns the package declaration of a file, if the language has one (Kotlin today). */
+export function extractPackage(ast: AstNode, languageId: string): string | null {
+  if (languageId !== 'kt' && languageId !== 'kts') return null;
+  let found: string | null = null;
+  walk(ast, (n) => {
+    if (found) return true;
+    if (n.type === 'package_header') {
+      const m = n.preview.match(/^\s*package\s+(\w+(?:\.\w+)*)/);
+      if (m) found = m[1];
+      return true;
+    }
+    return false;
+  });
+  return found;
+}
+
+/**
+ * Top-level declaration names (classes/objects/interfaces/top-level fns) for a Kotlin file.
+ * Used to populate the package index for cross-file import resolution.
+ */
+export function extractTopLevelDeclarations(ast: AstNode, languageId: string): string[] {
+  if (languageId !== 'kt' && languageId !== 'kts') return [];
+  const out: string[] = [];
+  for (const c of ast.children) {
+    if (
+      c.type !== 'class_declaration' &&
+      c.type !== 'object_declaration' &&
+      c.type !== 'function_declaration' &&
+      c.type !== 'property_declaration' &&
+      c.type !== 'type_alias'
+    ) {
+      continue;
+    }
+    for (const cc of c.children) {
+      if (
+        cc.type === 'identifier' ||
+        cc.type === 'type_identifier' ||
+        cc.type === 'simple_identifier'
+      ) {
+        if (cc.preview) out.push(cc.preview);
+        break;
+      }
+    }
+  }
   return out;
 }

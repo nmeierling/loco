@@ -3,8 +3,10 @@ import { AnalysisStore } from '../state/analysis.store';
 import { ComplexityService } from './complexity.service';
 import { detectLanguage } from '../languages';
 import { walk } from '../models/tree';
-import { extractImports } from './imports';
-import { resolveSpecifier } from './module-resolve';
+import { extractImports, extractPackage, extractTopLevelDeclarations } from './imports';
+import { KotlinResolveContext, resolveKotlin, resolveSpecifier } from './module-resolve';
+
+const KOTLIN_LANGS = new Set(['kt', 'kts']);
 
 export interface GraphNode {
   path: string;
@@ -86,6 +88,8 @@ export class ModuleGraphService {
     const candidates = [...fileSet];
     const total = candidates.length;
     const importsByPath = new Map<string, string[]>();
+    const packageByPath = new Map<string, string>();
+    const declsByPath = new Map<string, string[]>();
     let done = 0;
 
     for (const path of candidates) {
@@ -101,6 +105,12 @@ export class ModuleGraphService {
         if (ast) {
           const specs = extractImports(ast, langId).map((i) => i.specifier);
           if (specs.length > 0) importsByPath.set(path, specs);
+          if (KOTLIN_LANGS.has(langId)) {
+            const pkg = extractPackage(ast, langId);
+            if (pkg) packageByPath.set(path, pkg);
+            const decls = extractTopLevelDeclarations(ast, langId);
+            if (decls.length > 0) declsByPath.set(path, decls);
+          }
         }
       } catch {
         // skip
@@ -111,6 +121,9 @@ export class ModuleGraphService {
       progress?.(p);
       if (done % 4 === 0) await new Promise((r) => setTimeout(r, 0));
     }
+
+    // Build Kotlin package indices once for the whole repo
+    const kotlinCtx: KotlinResolveContext = buildKotlinContext(packageByPath, declsByPath);
 
     // Build name → path index for absolute Python-like imports
     const allFiles = new Set<string>();
@@ -138,9 +151,18 @@ export class ModuleGraphService {
     for (const [from, specs] of importsByPath) {
       const langId = langByPath.get(from) ?? 'ts';
       for (const spec of specs) {
-        const resolved = resolveSpecifier(spec, from, langId, allFiles);
+        let resolved: string | null;
+        if (KOTLIN_LANGS.has(langId)) {
+          resolved = resolveKotlin(spec, kotlinCtx);
+        } else {
+          resolved = resolveSpecifier(spec, from, langId, allFiles);
+        }
         if (resolved) {
           addEdge(from, resolved);
+        } else if (KOTLIN_LANGS.has(langId)) {
+          // Kotlin imports are absolute. Treat unresolved Kotlin imports as external
+          // (standard library, kotlin.*, java.*, third-party) — not a bug in our walker.
+          externalCount++;
         } else if (spec.startsWith('.') || spec.startsWith('/')) {
           unresolvedCount++;
         } else {
@@ -190,5 +212,46 @@ export class ModuleGraphService {
     this.buildingFor = null;
     this.building.set(null);
   }
+}
+
+/**
+ * Builds the indices that {@link resolveKotlin} needs: one mapping fully-qualified
+ * class/object/function names to their file paths, and one mapping package names
+ * to the list of files declaring members in that package.
+ *
+ * Both the explicit declarations (from `extractTopLevelDeclarations`) and the file
+ * stem are used as candidate names — Kotlin convention is `Foo.kt` declares `Foo`,
+ * but multi-declaration files (`Models.kt`) need the explicit list too.
+ */
+export function buildKotlinContext(
+  packageByPath: ReadonlyMap<string, string>,
+  declsByPath: ReadonlyMap<string, readonly string[]>,
+): KotlinResolveContext {
+  const pkgIndex = new Map<string, string>();
+  const pkgFiles = new Map<string, string[]>();
+
+  for (const [path, pkg] of packageByPath) {
+    const list = pkgFiles.get(pkg) ?? [];
+    list.push(path);
+    pkgFiles.set(pkg, list);
+
+    const last = path.lastIndexOf('/');
+    const filename = last >= 0 ? path.slice(last + 1) : path;
+    const stem = filename.replace(/\.(kts?|java|scala)$/i, '');
+    if (stem) {
+      const key = pkg ? `${pkg}.${stem}` : stem;
+      if (!pkgIndex.has(key)) pkgIndex.set(key, path);
+    }
+
+    const decls = declsByPath.get(path);
+    if (decls) {
+      for (const d of decls) {
+        const key = pkg ? `${pkg}.${d}` : d;
+        if (!pkgIndex.has(key)) pkgIndex.set(key, path);
+      }
+    }
+  }
+
+  return { pkgIndex, pkgFiles };
 }
 
