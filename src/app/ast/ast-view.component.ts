@@ -1,49 +1,310 @@
-import { ChangeDetectionStrategy, Component } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  Input,
+  effect,
+  inject,
+  signal,
+} from '@angular/core';
+import { RouterLink } from '@angular/router';
+import { AnalysisStore } from '../core/state/analysis.store';
+import { AstNode, ComplexityService } from '../core/services/complexity.service';
+import { detectLanguage } from '../core/languages';
 
-/**
- * AST code-flow view — placeholder.
- *
- * The architecture is already in place to support this:
- *  - `core/services/complexity.service.ts` defines a `ComplexityProvider` plug-point;
- *    a future `TreeSitterComplexityProvider` will host the parser layer.
- *  - `viz/viz-registry.ts` accepts additional viz descriptors; the AST view will
- *    register itself once the parser is wired.
- *
- * Planned features:
- *  - Pick a file from the loaded tree
- *  - Parse with web-tree-sitter (grammars under `public/grammars/{lang}.wasm`)
- *  - Render call graph / control-flow diagram (e.g. dagre + svg)
- */
+type LoadState =
+  | { kind: 'idle' }
+  | { kind: 'loading'; path: string }
+  | { kind: 'unsupported'; path: string; language: string | null }
+  | { kind: 'error'; path: string; message: string }
+  | { kind: 'ready'; path: string; language: string; root: AstNode };
+
 @Component({
-  selector: 'loco-ast-view',
+  selector: 'loco-ast-node',
   standalone: true,
+  imports: [],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="placeholder">
-      <h2>AST code flow</h2>
-      <p>Planned for a future iteration. The plumbing is in place — see comments in:</p>
-      <ul>
-        <li><code>core/services/complexity.service.ts</code></li>
-        <li><code>viz/viz-registry.ts</code></li>
-      </ul>
+    <div class="row" (click)="toggle()" [class.has-children]="hasChildren()">
+      <span class="chev">{{ hasChildren() ? (expanded() ? '▾' : '▸') : '·' }}</span>
+      <span class="type">{{ node.type }}</span>
+      <span class="pos">{{ node.startRow + 1 }}:{{ node.startCol + 1 }}</span>
+      @if (node.preview) {
+        <span class="preview">{{ node.preview }}</span>
+      }
     </div>
+    @if (expanded()) {
+      <div class="children">
+        @for (c of node.children; track $index) {
+          <loco-ast-node [node]="c" [depth]="depth + 1" />
+        }
+      </div>
+    }
   `,
   styles: [
     `
-      .placeholder {
-        padding: 24px;
-        max-width: 640px;
+      :host {
+        display: block;
       }
-      h2 {
-        margin-top: 0;
-      }
-      code {
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        background: var(--input-bg);
-        padding: 1px 5px;
+      .row {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        padding: 1px 6px;
         border-radius: 3px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+        cursor: pointer;
+        white-space: nowrap;
+        overflow: hidden;
+      }
+      .row.has-children:hover {
+        background: var(--hover);
+      }
+      .chev {
+        width: 10px;
+        display: inline-block;
+        text-align: center;
+        opacity: 0.5;
+        font-size: 10px;
+        flex-shrink: 0;
+      }
+      .type {
+        color: var(--accent);
+        flex-shrink: 0;
+      }
+      .pos {
+        opacity: 0.45;
+        font-size: 10px;
+        flex-shrink: 0;
+      }
+      .preview {
+        opacity: 0.75;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        flex: 1;
+      }
+      .children {
+        padding-left: 14px;
+        position: relative;
+      }
+      .children::before {
+        content: '';
+        position: absolute;
+        left: 4px;
+        top: 0;
+        bottom: 0;
+        width: 1px;
+        background: var(--border);
       }
     `,
   ],
 })
-export class AstViewComponent {}
+export class AstNodeComponent {
+  @Input({ required: true }) node!: AstNode;
+  @Input() depth = 0;
+
+  private readonly _expanded = signal(true);
+  readonly expanded = this._expanded.asReadonly();
+
+  hasChildren(): boolean {
+    return this.node.children.length > 0;
+  }
+
+  toggle(): void {
+    if (this.hasChildren()) this._expanded.update((v) => !v);
+  }
+}
+
+@Component({
+  selector: 'loco-ast-view',
+  standalone: true,
+  imports: [AstNodeComponent, RouterLink],
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `
+    @switch (state().kind) {
+      @case ('idle') {
+        <div class="placeholder">
+          <h2>AST view</h2>
+          @if (store.root()) {
+            <p>Select a file in the sidebar (double-click to open here).</p>
+          } @else {
+            <p>No project loaded. <a routerLink="/">Go to heatmap</a> to drop a folder.</p>
+          }
+        </div>
+      }
+      @case ('loading') {
+        <div class="placeholder">Parsing {{ stateLoadingPath() }}…</div>
+      }
+      @case ('unsupported') {
+        <div class="placeholder">
+          <h3>{{ stateUnsupportedPath() }}</h3>
+          <p>
+            No tree-sitter grammar installed for
+            <code>{{ stateUnsupportedLang() ?? 'this file type' }}</code>.
+          </p>
+          <p class="hint">Supported: TypeScript, TSX, JavaScript, Python, Go, Rust, Java, C/C++, C#, PHP, Ruby, Bash, Kotlin, Swift, Scala, Dart, Lua, Elixir.</p>
+        </div>
+      }
+      @case ('error') {
+        <div class="placeholder error">
+          <h3>{{ stateErrorPath() }}</h3>
+          <p>{{ stateErrorMessage() }}</p>
+        </div>
+      }
+      @case ('ready') {
+        <header class="head">
+          <span class="path">{{ stateReadyPath() }}</span>
+          <span class="lang">{{ stateReadyLang() }}</span>
+        </header>
+        <div class="ast-scroll">
+          @if (stateReadyRoot(); as root) {
+            <loco-ast-node [node]="root" />
+          }
+        </div>
+      }
+    }
+  `,
+  styles: [
+    `
+      :host {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        width: 100%;
+        min-height: 0;
+      }
+      .head {
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+        padding: 8px 14px;
+        border-bottom: 1px solid var(--border);
+        background: var(--bar-bg);
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+      }
+      .path {
+        font-weight: 500;
+      }
+      .lang {
+        opacity: 0.6;
+        font-size: 11px;
+      }
+      .ast-scroll {
+        flex: 1;
+        overflow: auto;
+        padding: 8px 12px;
+      }
+      .placeholder {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        padding: 24px;
+        text-align: center;
+        opacity: 0.85;
+      }
+      .placeholder h2,
+      .placeholder h3 {
+        margin: 0 0 6px;
+      }
+      .placeholder.error {
+        color: var(--danger);
+      }
+      code {
+        background: var(--input-bg);
+        padding: 1px 5px;
+        border-radius: 3px;
+      }
+      .hint {
+        font-size: 11px;
+        opacity: 0.65;
+      }
+    `,
+  ],
+})
+export class AstViewComponent {
+  readonly store = inject(AnalysisStore);
+  private readonly complexity = inject(ComplexityService);
+
+  readonly state = signal<LoadState>({ kind: 'idle' });
+
+  constructor() {
+    effect(() => {
+      const path = this.store.selectedPath();
+      const blobs = this.store.fileBlobs();
+      if (!path) {
+        this.state.set({ kind: 'idle' });
+        return;
+      }
+      const file = blobs.get(path);
+      if (!file) {
+        this.state.set({ kind: 'error', path, message: 'File not found in current load.' });
+        return;
+      }
+      void this.load(path, file);
+    });
+  }
+
+  private async load(path: string, file: File): Promise<void> {
+    this.state.set({ kind: 'loading', path });
+    const lang = detectLanguage(file.name);
+    if (!lang || !this.complexity.supports(lang.id)) {
+      this.state.set({ kind: 'unsupported', path, language: lang?.name ?? null });
+      return;
+    }
+    try {
+      const text = await file.text();
+      const root = await this.complexity.parse(text, lang.id);
+      if (!root) {
+        this.state.set({
+          kind: 'error',
+          path,
+          message: 'Parse returned no result (file may be too large).',
+        });
+        return;
+      }
+      this.state.set({ kind: 'ready', path, language: lang.name, root });
+    } catch (e) {
+      this.state.set({
+        kind: 'error',
+        path,
+        message: e instanceof Error ? e.message : 'Parse failed.',
+      });
+    }
+  }
+
+  stateLoadingPath(): string {
+    const s = this.state();
+    return s.kind === 'loading' ? s.path : '';
+  }
+  stateUnsupportedPath(): string {
+    const s = this.state();
+    return s.kind === 'unsupported' ? s.path : '';
+  }
+  stateUnsupportedLang(): string | null {
+    const s = this.state();
+    return s.kind === 'unsupported' ? s.language : null;
+  }
+  stateErrorPath(): string {
+    const s = this.state();
+    return s.kind === 'error' ? s.path : '';
+  }
+  stateErrorMessage(): string {
+    const s = this.state();
+    return s.kind === 'error' ? s.message : '';
+  }
+  stateReadyPath(): string {
+    const s = this.state();
+    return s.kind === 'ready' ? s.path : '';
+  }
+  stateReadyLang(): string {
+    const s = this.state();
+    return s.kind === 'ready' ? s.language : '';
+  }
+  stateReadyRoot(): AstNode | null {
+    const s = this.state();
+    return s.kind === 'ready' ? s.root : null;
+  }
+}

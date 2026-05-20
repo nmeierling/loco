@@ -1,13 +1,12 @@
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
-import { RouterLink, RouterLinkActive } from '@angular/router';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { AnalysisService } from '../core/services/analysis.service';
 import { AnalysisStore } from '../core/state/analysis.store';
 import { LoadResult } from '../core/services/directory-loader.service';
-import { VizRegistry } from '../viz/viz-registry';
-import { TreemapComponent } from '../viz/treemap/treemap.component';
 import { FilterBarComponent } from '../filters/filter-bar.component';
 import { DropZoneComponent } from './drop-zone.component';
-import { VizHostComponent } from '../viz/viz-host.component';
+import { SpinnerComponent } from './spinner.component';
+import { DirectoryTreeComponent } from './directory-tree.component';
 
 @Component({
   selector: 'loco-shell',
@@ -15,9 +14,11 @@ import { VizHostComponent } from '../viz/viz-host.component';
   imports: [
     FilterBarComponent,
     DropZoneComponent,
-    VizHostComponent,
+    SpinnerComponent,
+    DirectoryTreeComponent,
     RouterLink,
     RouterLinkActive,
+    RouterOutlet,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -28,7 +29,7 @@ import { VizHostComponent } from '../viz/viz-host.component';
       </div>
       <nav class="nav">
         <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">heatmap</a>
-        <a routerLink="/ast" routerLinkActive="active">ast (soon)</a>
+        <a routerLink="/ast" routerLinkActive="active">ast</a>
       </nav>
       @if (store.root(); as r) {
         <div class="root">
@@ -47,14 +48,21 @@ import { VizHostComponent } from '../viz/viz-host.component';
       </section>
     } @else {
       <loco-filter-bar />
-      <main class="viz-area">
-        <loco-viz-host />
-      </main>
+      <div class="body">
+        <aside class="sidebar">
+          <loco-directory-tree />
+        </aside>
+        <main class="viz-area">
+          <router-outlet />
+        </main>
+      </div>
     }
 
     @if (statusLine(); as s) {
       <footer class="status">{{ s }}</footer>
     }
+
+    <loco-spinner />
   `,
   styles: [
     `
@@ -147,9 +155,28 @@ import { VizHostComponent } from '../viz/viz-host.component';
         color: var(--danger);
         font-size: 12px;
       }
+      .body {
+        flex: 1;
+        display: flex;
+        min-height: 0;
+      }
+      .sidebar {
+        width: 280px;
+        flex-shrink: 0;
+        border-right: 1px solid var(--border);
+        background: var(--bar-bg);
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+      .sidebar > loco-directory-tree {
+        flex: 1;
+        min-height: 0;
+      }
       .viz-area {
         flex: 1;
         min-height: 0;
+        min-width: 0;
       }
       .status {
         border-top: 1px solid var(--border);
@@ -162,10 +189,9 @@ import { VizHostComponent } from '../viz/viz-host.component';
     `,
   ],
 })
-export class ShellComponent implements OnInit {
+export class ShellComponent {
   readonly store = inject(AnalysisStore);
   private readonly analysis = inject(AnalysisService);
-  private readonly registry = inject(VizRegistry);
   readonly errorMessage = signal<string | null>(null);
 
   readonly statusLine = computed(() => {
@@ -175,21 +201,14 @@ export class ShellComponent implements OnInit {
         return s.message;
       case 'counting':
         return `Counting ${s.done}/${s.total}…`;
+      case 'parsing':
+        return `Parsing ${s.done}/${s.total}…`;
       case 'error':
         return `Error: ${s.message}`;
       default:
         return null;
     }
   });
-
-  ngOnInit(): void {
-    this.registry.register({
-      id: 'treemap',
-      label: 'Treemap',
-      description: 'Nested rectangles sized by metric, colored by complexity.',
-      component: TreemapComponent,
-    });
-  }
 
   async onLoaded(result: LoadResult): Promise<void> {
     this.errorMessage.set(null);

@@ -9,6 +9,9 @@ export class AnalysisStore {
   readonly rootName = signal<string>('');
   readonly status = signal<AnalysisPhase>({ phase: 'idle' });
   readonly filters = signal<Filters>(DEFAULT_FILTERS);
+  readonly selectedPath = signal<string | null>(null);
+  /** Path → File for files that survived ignore filters. Lets per-file views (AST) re-read text on demand. */
+  readonly fileBlobs = signal<ReadonlyMap<string, File>>(new Map());
 
   readonly filteredRoot = computed<DirNode | null>(() => {
     const root = this.root();
@@ -19,13 +22,18 @@ export class AnalysisStore {
     return filtered && isDir(filtered) ? filtered : root;
   });
 
-  setRoot(root: DirNode, rootName: string): void {
+  setRoot(root: DirNode, rootName: string, blobs: ReadonlyMap<string, File>): void {
     this.root.set(root);
     this.rootName.set(rootName);
+    this.fileBlobs.set(blobs);
   }
 
   updateFilters(patch: Partial<Filters>): void {
     this.filters.update((f) => ({ ...f, ...patch }));
+  }
+
+  selectPath(path: string | null): void {
+    this.selectedPath.set(path);
   }
 
   clear(): void {
@@ -33,6 +41,8 @@ export class AnalysisStore {
     this.rootName.set('');
     this.status.set({ phase: 'idle' });
     this.filters.set(DEFAULT_FILTERS);
+    this.selectedPath.set(null);
+    this.fileBlobs.set(new Map());
   }
 }
 

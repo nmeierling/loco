@@ -9,6 +9,7 @@ import {
   inject,
   signal,
 } from '@angular/core';
+import { Router } from '@angular/router';
 import { HierarchyRectangularNode, hierarchy, treemap, treemapSquarify } from 'd3-hierarchy';
 import { interpolateYlOrRd } from 'd3-scale-chromatic';
 import { scaleSequential } from 'd3-scale';
@@ -42,13 +43,16 @@ interface TileDatum {
               [attr.transform]="'translate(' + t.x + ',' + t.y + ')'"
               (mousemove)="onHover($event, t)"
               (mouseleave)="onLeave()"
+              (click)="onSelect(t)"
+              (dblclick)="onOpenAst(t)"
+              class="tile"
             >
               <rect
                 [attr.width]="t.width"
                 [attr.height]="t.height"
                 [attr.fill]="t.fill"
-                stroke="rgba(0,0,0,0.35)"
-                [attr.stroke-width]="t.width > 4 && t.height > 4 ? 0.5 : 0"
+                [attr.stroke]="isSelected(t) ? 'var(--accent)' : 'rgba(0,0,0,0.35)'"
+                [attr.stroke-width]="isSelected(t) ? 2 : (t.width > 4 && t.height > 4 ? 0.5 : 0)"
               />
               @if (t.width > 60 && t.height > 18) {
                 <text
@@ -94,6 +98,9 @@ interface TileDatum {
         opacity: 0.5;
         text-align: center;
       }
+      .tile {
+        cursor: pointer;
+      }
       .tip {
         position: absolute;
         pointer-events: none;
@@ -124,6 +131,7 @@ interface TileDatum {
 })
 export class TreemapComponent implements AfterViewInit {
   private readonly store = inject(AnalysisStore);
+  private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
 
   @ViewChild('wrap', { static: true }) wrap!: ElementRef<HTMLDivElement>;
@@ -136,16 +144,13 @@ export class TreemapComponent implements AfterViewInit {
   );
 
   constructor() {
-    effect(
-      () => {
-        const root = this.store.filteredRoot();
-        const metric = this.store.filters().metric;
-        const w = this.width();
-        const h = this.height();
-        this.tiles.set(this.layout(root, metric, w, h));
-      },
-      { allowSignalWrites: true },
-    );
+    effect(() => {
+      const root = this.store.filteredRoot();
+      const metric = this.store.filters().metric;
+      const w = this.width();
+      const h = this.height();
+      this.tiles.set(this.layout(root, metric, w, h));
+    });
   }
 
   ngAfterViewInit(): void {
@@ -174,6 +179,21 @@ export class TreemapComponent implements AfterViewInit {
 
   onLeave(): void {
     this.tip.set(null);
+  }
+
+  onSelect(t: TileDatum): void {
+    if (isFile(t.node)) this.store.selectPath(t.node.path);
+  }
+
+  onOpenAst(t: TileDatum): void {
+    if (isFile(t.node)) {
+      this.store.selectPath(t.node.path);
+      this.router.navigate(['/ast']);
+    }
+  }
+
+  isSelected(t: TileDatum): boolean {
+    return isFile(t.node) && this.store.selectedPath() === t.node.path;
   }
 
   private layout(root: DirNode | null, metric: MetricKind, w: number, h: number): TileDatum[] {
