@@ -380,6 +380,8 @@ export class ShellComponent {
         return `Counting ${s.done}/${s.total}…`;
       case 'parsing':
         return `Parsing ${s.done}/${s.total}…`;
+      case 'churn':
+        return s.total > 0 ? `Walking history ${s.done}/${s.total}…` : 'Walking git history…';
       case 'error':
         return `Error: ${s.message}`;
       default:

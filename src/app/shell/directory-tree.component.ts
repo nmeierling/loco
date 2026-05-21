@@ -9,6 +9,9 @@ import {
 import { DecimalPipe } from '@angular/common';
 import { Router } from '@angular/router';
 import { AnalysisStore } from '../core/state/analysis.store';
+import { routeUrlSignal } from '../core/state/route-url';
+import { ComplexityService } from '../core/services/complexity.service';
+import { detectLanguage } from '../core/languages';
 import { DirNode, MetricKind, TreeNode, isDir, isFile, metricValue } from '../core/models/tree';
 
 @Component({
@@ -147,7 +150,26 @@ export class TreeNodeComponent {
 
   readonly indent = 8;
   private readonly _expanded = signal(false);
-  readonly expanded = this._expanded.asReadonly();
+  /**
+   * Effective expanded state. When a name/path filter is active we force-expand
+   * every directory so matches inside collapsed folders aren't hidden; clearing
+   * the filter restores whatever the user (or default) had set.
+   */
+  readonly expanded = computed(() => {
+    if (this.filterIsActive()) return true;
+    return this._expanded();
+  });
+
+  /**
+   * Only the name filter triggers auto-expand — a name match deep in the tree would
+   * otherwise be invisible behind collapsed folders. The path filter is usually set
+   * by the funnel icon next to a folder the user already has in view, so we leave
+   * the user's expansion state alone in that case.
+   */
+  readonly filterIsActive = computed(() => {
+    const f = this.store.filters();
+    return !!f.name;
+  });
 
   readonly metric = computed<MetricKind>(() => this.store.filters().metric);
   readonly rootName = this.store.rootName;
@@ -177,6 +199,10 @@ export class TreeNodeComponent {
   }
 
   toggle(): void {
+    // Ignore manual toggles while a filter is active — the computed `expanded`
+    // is forced to true, so flipping the local signal would only silently
+    // mutate state the user can't see.
+    if (this.filterIsActive()) return;
     this._expanded.update((v) => !v);
   }
 
@@ -207,8 +233,11 @@ export class TreeNodeComponent {
       <div class="tree">
         <loco-tree-node [node]="r" [depth]="0" />
       </div>
+      @if (astModeNote()) {
+        <div class="note">{{ astModeNote() }}</div>
+      }
     } @else {
-      <div class="empty">No tree loaded.</div>
+      <div class="empty">{{ emptyMessage() }}</div>
     }
   `,
   styles: [
@@ -226,10 +255,56 @@ export class TreeNodeComponent {
         opacity: 0.5;
         padding: 12px;
       }
+      .note {
+        margin-top: 8px;
+        padding: 6px 8px;
+        font-size: 10px;
+        opacity: 0.6;
+        line-height: 1.4;
+        border-top: 1px solid var(--border);
+      }
     `,
   ],
 })
 export class DirectoryTreeComponent {
   private readonly store = inject(AnalysisStore);
-  readonly root = this.store.filteredRoot;
+  private readonly complexity = inject(ComplexityService);
+  private readonly url = routeUrlSignal();
+
+  readonly astMode = computed(() => this.url().startsWith('/ast'));
+
+  readonly root = computed<DirNode | null>(() => {
+    const base = this.store.filteredRoot();
+    if (!base) return null;
+    if (!this.astMode()) return base;
+    const pruned = pruneToSupported(base, this.complexity);
+    return pruned && isDir(pruned) ? pruned : null;
+  });
+
+  readonly astModeNote = computed(() =>
+    this.astMode() ? 'Showing only files with AST support.' : '',
+  );
+
+  readonly emptyMessage = computed(() =>
+    this.astMode()
+      ? 'No AST-supported files in this project.'
+      : 'No tree loaded.',
+  );
+}
+
+function pruneToSupported(
+  node: TreeNode,
+  complexity: ComplexityService,
+): TreeNode | null {
+  if (isFile(node)) {
+    const lang = detectLanguage(node.name);
+    return lang && complexity.supports(lang.id) ? node : null;
+  }
+  const kept: TreeNode[] = [];
+  for (const c of node.children) {
+    const k = pruneToSupported(c, complexity);
+    if (k) kept.push(k);
+  }
+  if (kept.length === 0) return null;
+  return { ...node, children: kept };
 }

@@ -4,5 +4,6 @@ export type AnalysisPhase =
   | { phase: 'loading'; message: string }
   | { phase: 'counting'; done: number; total: number }
   | { phase: 'parsing'; done: number; total: number }
+  | { phase: 'churn'; done: number; total: number }
   | { phase: 'ready' }
   | { phase: 'error'; message: string };

@@ -6,20 +6,15 @@ test('cancelling the file picker resets the spinner instead of leaving it stuck'
   await page.reload();
   await page.waitForSelector('loco-drop-zone');
 
-  // Pretend the FS Access API isn't there so the webkitdirectory path is exercised.
-  // (Cancel via that path is fully driven by the input's `cancel` event, which we can dispatch.)
-  await page.evaluate(() => {
-    delete (window as unknown as { showDirectoryPicker?: unknown }).showDirectoryPicker;
-  });
-  await page.reload();
-  await page.waitForSelector('loco-drop-zone');
+  // Pre-register a filechooser handler so Playwright doesn't hang on the programmatic
+  // input.click() inside our openPicker. The handler just keeps a reference; we don't
+  // call setFiles because we want to test the cancel path.
+  page.on('filechooser', () => undefined);
 
-  // Click "choose a folder" — this fires started.emit() and calls input.click().
-  // In headless Chrome the click on a file input doesn't open a real dialog; we
-  // just need to verify that the spinner appears and that cancel resets it.
-  await page.locator('loco-drop-zone .link').click();
+  // Click "choose a folder" — fires the started event before opening the picker.
+  await page.locator('loco-drop-zone .link').click({ noWaitAfter: true });
 
-  // Spinner becomes visible immediately
+  // Spinner becomes visible (because started.emit set status to 'reading')
   await expect(page.locator('loco-spinner .overlay')).toBeVisible();
 
   // Simulate the user dismissing the picker
@@ -30,6 +25,5 @@ test('cancelling the file picker resets the spinner instead of leaving it stuck'
 
   // Spinner goes away
   await expect(page.locator('loco-spinner .overlay')).toBeHidden();
-  // And the welcome screen is still visible (no project loaded)
   await expect(page.locator('loco-drop-zone')).toBeVisible();
 });

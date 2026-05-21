@@ -4,6 +4,7 @@ import { LoadResult } from './directory-loader.service';
 import { LocInput, LocService } from './loc.service';
 import { IgnoreService } from './ignore.service';
 import { ComplexityService } from './complexity.service';
+import { GitChurnService } from './git-churn.service';
 import { DirNode, FileNode } from '../models/tree';
 import { detectLanguage, extOf } from '../languages';
 
@@ -13,9 +14,16 @@ export class AnalysisService {
   private readonly loc = inject(LocService);
   private readonly ig = inject(IgnoreService);
   private readonly complexity = inject(ComplexityService);
+  private readonly churn = inject(GitChurnService);
 
   async analyze(load: LoadResult): Promise<void> {
     this.store.status.set({ phase: 'loading', message: `Reading ${load.rootName}…` });
+
+    // Build a quick map of ALL loaded files (including `.git/`) so git-churn can mine
+    // commit history. Analysis filters happen separately below and leave `.git/` out
+    // of the tree the user sees.
+    const allFilesMap = new Map<string, File>();
+    for (const f of load.files) allFilesMap.set(f.path, f.file);
 
     const gitignorePatterns = await this.collectGitignores(load.files);
     this.ig.setGitignorePatterns(gitignorePatterns);
@@ -55,12 +63,97 @@ export class AnalysisService {
       await this.refineComplexity(inputs, fileNodes);
     }
 
+    this.logGitDetection(allFilesMap);
+    if (this.churn.hasGitDir(allFilesMap)) {
+      await this.refineChurn(allFilesMap, fileNodes);
+    }
+
     const blobs = new Map<string, File>();
     for (const input of inputs) blobs.set(input.path, input.file);
 
     const root = buildTree(load.rootName, fileNodes);
     this.store.setRoot(root, load.rootName, blobs);
     this.store.status.set({ phase: 'ready' });
+  }
+
+  private async refineChurn(
+    allFiles: ReadonlyMap<string, File>,
+    fileNodes: FileNode[],
+  ): Promise<void> {
+    this.store.status.set({ phase: 'churn', done: 0, total: 0 });
+    try {
+      console.info('[loco] churn: walking git history…');
+      const result = await this.churn.churnByPath(allFiles, (p) => {
+        this.store.status.set({ phase: 'churn', done: p.done, total: p.total });
+      });
+      if (!result) {
+        console.warn('[loco] churn: service returned no result (no .git/HEAD?)');
+        return;
+      }
+      console.info(
+        '[loco] churn: scanned %d commits, %d files have churn data',
+        result.commitsScanned,
+        result.countByPath.size,
+      );
+      const byPath = result.countByPath;
+      let matched = 0;
+      for (const node of fileNodes) {
+        const c = byPath.get(node.path);
+        if (c !== undefined) {
+          node.metrics = { ...node.metrics, churn: c };
+          matched++;
+        }
+      }
+      console.info(
+        '[loco] churn: %d of %d tree files matched a git path; sample git paths: %o',
+        matched,
+        fileNodes.length,
+        [...byPath.keys()].slice(0, 5),
+      );
+    } catch (e) {
+      // Don't fail the whole analysis if git parsing breaks — just leave churn null.
+      console.warn('[loco] git churn computation failed', e);
+    }
+  }
+
+  /**
+   * Logs to the browser console where (if anywhere) we found a `.git/` directory in
+   * the dropped folder. Helps debug "I dropped a repo but churn didn't appear" cases
+   * (typical culprits: hidden files excluded by drag-drop, or the dropped folder is a
+   * parent of the actual repo).
+   */
+  private logGitDetection(files: ReadonlyMap<string, File>): void {
+    const gitFiles = [...files.keys()].filter((p) => p.includes('.git/'));
+    if (gitFiles.length === 0) {
+      console.info(
+        '[loco] git churn: no .git/ files in the dropped folder — Churn chip will stay hidden. ' +
+          'Make sure you dropped the project root (the folder that contains .git/) and that your ' +
+          'browser includes hidden files in folder uploads.',
+      );
+      return;
+    }
+    const heads = gitFiles.filter((p) => /(^|\/)\.git\/HEAD$/.test(p));
+    console.info(
+      '[loco] git churn: found %d .git/* files in the upload, %d of them are HEAD files. ' +
+        'Sample paths: %o',
+      gitFiles.length,
+      heads.length,
+      gitFiles.slice(0, 5),
+    );
+    if (heads.length === 0) {
+      console.warn(
+        '[loco] git churn: no .git/HEAD found in the upload despite other .git files being present. ' +
+          'Some browsers strip hidden top-level files from drag-drop — try using the “choose a folder” picker.',
+      );
+    } else if (!files.has('.git/HEAD')) {
+      const nested = heads[0]?.replace(/\.git\/HEAD$/, '');
+      console.warn(
+        '[loco] git churn: .git/HEAD is nested under "%s". Currently we only mine churn for repos where ' +
+          '.git/ is at the dropped folder root. Drop %s instead, or we can teach the service to handle nested repos.',
+        nested,
+        nested,
+      );
+    }
   }
 
   private async refineComplexity(inputs: LocInput[], fileNodes: FileNode[]): Promise<void> {

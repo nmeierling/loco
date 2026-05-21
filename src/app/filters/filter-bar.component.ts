@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/c
 import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { AnalysisStore } from '../core/state/analysis.store';
+import { routeUrlSignal } from '../core/state/route-url';
 import { MetricKind, fileCount, metricValue } from '../core/models/tree';
 import { VizRegistry } from '../viz/viz-registry';
 
@@ -39,32 +40,34 @@ interface MetricOption {
       <div class="group">
         <span class="label">metric</span>
         @for (m of metrics; track m.id) {
-          @if (!m.hidden) {
-            <button
-              type="button"
-              class="chip"
-              [class.active]="filters().metric === m.id"
-              (click)="setMetric(m.id)"
-            >
-              {{ m.label }}
-            </button>
-          }
-        }
-      </div>
-
-      <div class="group">
-        <span class="label">viz</span>
-        @for (v of vizList(); track v.id) {
           <button
             type="button"
             class="chip"
-            [class.active]="selectedViz() === v.id"
-            (click)="setViz(v.id)"
+            [class.active]="filters().metric === m.id"
+            [disabled]="isMetricDisabled(m.id)"
+            [title]="metricTitle(m.id)"
+            (click)="setMetric(m.id)"
           >
-            {{ v.label }}
+            {{ m.label }}
           </button>
         }
       </div>
+
+      @if (showVizSwitcher()) {
+        <div class="group">
+          <span class="label">viz</span>
+          @for (v of vizList(); track v.id) {
+            <button
+              type="button"
+              class="chip"
+              [class.active]="selectedViz() === v.id"
+              (click)="setViz(v.id)"
+            >
+              {{ v.label }}
+            </button>
+          }
+        </div>
+      }
 
       <div class="spacer"></div>
 
@@ -100,8 +103,12 @@ interface MetricOption {
         min-width: 140px;
       }
       .search.path {
-        min-width: 440px;
-        flex: 1 1 440px;
+        /* Fixed-width so removing the VIZ chips on /ast doesn't let the input
+           flex-grow into the freed space. The trailing spacer div soaks up the
+           remaining row width instead. */
+        width: 440px;
+        flex: none;
+        min-width: 0;
       }
       .search:focus {
         outline: none;
@@ -153,8 +160,13 @@ interface MetricOption {
         color: var(--accent-fg);
         border-color: var(--accent);
       }
-      .chip:hover:not(.active) {
+      .chip:hover:not(.active):not(:disabled) {
         background: var(--hover);
+      }
+      .chip:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+        background: transparent;
       }
       .spacer {
         flex: 1;
@@ -178,11 +190,32 @@ export class FilterBarComponent {
   readonly metrics: MetricOption[] = [
     { id: 'loc', label: 'LOC' },
     { id: 'complexity', label: 'Complexity' },
-    { id: 'churn', label: 'Churn', hidden: true },
+    { id: 'churn', label: 'Churn' },
   ];
+
+  readonly hasChurnData = this.store.hasChurnData;
+
+  isMetricDisabled(id: MetricKind): boolean {
+    if (id === 'churn') return !this.hasChurnData();
+    return false;
+  }
+
+  metricTitle(id: MetricKind): string {
+    if (id === 'churn' && !this.hasChurnData()) {
+      return (
+        'No git churn data for this folder. To enable, drop a folder that contains a ' +
+        '.git/ directory. Works in Chromium-based browsers (Chrome, Edge, Brave). ' +
+        'Safari and Firefox strip hidden files from folder uploads, so .git/ is not ' +
+        'accessible there — open the project in Chrome to see churn.'
+      );
+    }
+    return '';
+  }
 
   readonly vizList = this.registry.all;
   readonly selectedViz = this.registry.selectedId;
+  private readonly url = routeUrlSignal();
+  readonly showVizSwitcher = computed(() => !this.url().startsWith('/ast'));
 
   readonly filesCount = computed(() => {
     const r = this.store.filteredRoot();

@@ -335,12 +335,17 @@ export class ModuleGraphComponent implements AfterViewInit {
   private readonly MINIMAP_H = 140;
   private readonly MINIMAP_PAD = 8;
 
-  readonly minimap = computed(() => {
+  /**
+   * Bounding box of the simulation nodes only. Used both as the minimap's natural
+   * extent and as the clamp box for minimap drags — so the viewport rectangle stops
+   * at the border instead of pushing it outwards (which used to make the minimap
+   * rescale and visually shrink).
+   */
+  private readonly nodeBounds = computed<
+    { minX: number; minY: number; maxX: number; maxY: number } | null
+  >(() => {
     const ns = this.nodes();
-    const w = this.width();
-    const h = this.height();
-    if (ns.length === 0 || w === 0 || h === 0) return null;
-
+    if (ns.length === 0) return null;
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
@@ -351,7 +356,20 @@ export class ModuleGraphComponent implements AfterViewInit {
       if (n.cx > maxX) maxX = n.cx;
       if (n.cy > maxY) maxY = n.cy;
     }
-    // Include current viewport in the bounds so the rectangle never escapes the minimap.
+    return { minX, minY, maxX, maxY };
+  });
+
+  readonly minimap = computed(() => {
+    const w = this.width();
+    const h = this.height();
+    const nodeB = this.nodeBounds();
+    const ns = this.nodes();
+    if (!nodeB || w === 0 || h === 0) return null;
+
+    let { minX, minY, maxX, maxY } = nodeB;
+    // Include current viewport in the bounds so the rectangle never escapes the minimap
+    // — useful when the user has used main-view drag or wheel zoom to look at empty
+    // space outside the graph. (Minimap drag itself is clamped to nodeBounds.)
     const z = this.zoom();
     const tx = this.tx();
     const ty = this.ty();
@@ -576,15 +594,39 @@ export class ModuleGraphComponent implements AfterViewInit {
     const svg = ev.currentTarget as SVGSVGElement;
     const center = (e: MouseEvent) => {
       const mm = this.minimap();
-      if (!mm) return;
+      const bounds = this.nodeBounds();
+      if (!mm || !bounds) return;
       const rect = svg.getBoundingClientRect();
       const mx = e.clientX - rect.left;
       const my = e.clientY - rect.top;
       const gx = (mx - mm.offX) / mm.scale;
       const gy = (my - mm.offY) / mm.scale;
       const z = this.zoom();
-      this.tx.set(this.width() / 2 - gx * z);
-      this.ty.set(this.height() / 2 - gy * z);
+      const vw = this.width() / z;
+      const vh = this.height() / z;
+
+      // Compute target viewport top-left (cursor centers the viewport)…
+      let gx0 = gx - vw / 2;
+      let gy0 = gy - vh / 2;
+
+      // …then clamp so the rectangle stops at the node bounds instead of pushing
+      // the minimap to rescale. If the viewport is larger than the graph extent,
+      // center the rectangle on that axis.
+      const gW = bounds.maxX - bounds.minX;
+      const gH = bounds.maxY - bounds.minY;
+      if (vw >= gW) {
+        gx0 = bounds.minX + (gW - vw) / 2;
+      } else {
+        gx0 = Math.max(bounds.minX, Math.min(bounds.maxX - vw, gx0));
+      }
+      if (vh >= gH) {
+        gy0 = bounds.minY + (gH - vh) / 2;
+      } else {
+        gy0 = Math.max(bounds.minY, Math.min(bounds.maxY - vh, gy0));
+      }
+
+      this.tx.set(-gx0 * z);
+      this.ty.set(-gy0 * z);
     };
     center(ev);
     const onMove = (e: MouseEvent) => center(e);

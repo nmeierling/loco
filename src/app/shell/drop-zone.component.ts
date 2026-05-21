@@ -29,9 +29,6 @@ function nextPaint(): Promise<void> {
       <div class="sub">
         or
         <button type="button" class="link" (click)="openPicker()">choose a folder</button>
-        @if (!hasFsApi) {
-          <span class="hint">(via file dialog)</span>
-        }
       </div>
       <input
         #fileInput
@@ -88,7 +85,6 @@ function nextPaint(): Promise<void> {
 })
 export class DropZoneComponent {
   private readonly loader = inject(DirectoryLoaderService);
-  readonly hasFsApi = this.loader.hasFsAccessApi();
   readonly dragOver = signal(false);
   /** True while a picker dialog is open via this component, so onInput knows the started event already fired. */
   private pickerInFlight = false;
@@ -135,35 +131,13 @@ export class DropZoneComponent {
   }
 
   async openPicker(): Promise<void> {
-    // Flip the spinner BEFORE the OS dialog opens so the user sees it as soon as
-    // they pick — even if the browser then spends seconds indexing the folder
-    // (webkitdirectory path) before firing the change event.
+    // Always use the webkitdirectory <input>. We deliberately avoid showDirectoryPicker
+    // here: in Chromium its directory iterator silently strips dotfiles
+    // (see https://github.com/whatwg/fs/issues/74), which means dropped repos would
+    // be missing .git/, .gitignore, .env, .eslintrc, etc. The legacy <input> picker
+    // includes hidden files.
     this.pickerInFlight = true;
     this.started.emit();
-
-    if (this.hasFsApi) {
-      // IMPORTANT: open the picker synchronously after the click handler — awaiting
-      // before calling it would burn the user-activation token and showDirectoryPicker
-      // would throw with NotAllowedError on user-gesture-required browsers.
-      const pickerPromise = this.loader.pickDirectory((n) => this.progress.emit(n));
-      // Picker dialog is now open; safe to yield a paint frame.
-      await nextPaint();
-      try {
-        const result = await pickerPromise;
-        this.pickerInFlight = false;
-        if (result) this.loaded.emit(result);
-        else this.canceled.emit();
-      } catch (e) {
-        this.pickerInFlight = false;
-        const msg = e instanceof Error ? e.message : String(e);
-        this.canceled.emit();
-        if (!/AbortError|user activation/i.test(msg)) this.error.emit(msg);
-      }
-      return;
-    }
-
-    // webkitdirectory fallback — open the file dialog synchronously. We wait for
-    // (change)/(cancel) on the input element to advance the flow.
     const input = document.querySelector<HTMLInputElement>('loco-drop-zone input[type="file"]');
     input?.click();
   }

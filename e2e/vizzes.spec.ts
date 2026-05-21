@@ -29,6 +29,49 @@ test.describe('Alternative vizzes (sunburst, module graph, dep matrix)', () => {
     await expect(page.locator('loco-ast-view loco-ast-node').first()).toBeVisible();
   });
 
+  test('minimap drag clamps the viewport at the graph edge (no rescale shrink)', async ({ page }) => {
+    await loadLocoSrc(page);
+    await selectViz(page, 'Module graph');
+    await page.waitForSelector('loco-module-graph svg circle');
+    // Let the simulation settle so node bounds stabilise.
+    await page.waitForTimeout(400);
+
+    const minimap = page.locator('loco-module-graph svg.minimap');
+    const box = await minimap.boundingBox();
+    if (!box) throw new Error('minimap not visible');
+
+    const scaleBefore = await page.$eval('loco-module-graph svg.minimap', (svg) => {
+      const stop = svg.querySelector<SVGCircleElement>('circle');
+      return stop ? Number(stop.getAttribute('r')) : 0;
+    });
+
+    // Drag past the bottom-right corner — the viewport rectangle must stop at the
+    // border instead of pushing the minimap to rescale (which used to make every
+    // node and the rect visibly shrink).
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width + 60, box.y + box.height + 60, { steps: 8 });
+    await page.mouse.up();
+    await page.waitForTimeout(150);
+
+    const vpBox = await page.$eval('loco-module-graph svg.minimap rect.vp', (r) => ({
+      x: Number(r.getAttribute('x')),
+      y: Number(r.getAttribute('y')),
+      w: Number(r.getAttribute('width')),
+      h: Number(r.getAttribute('height')),
+    }));
+    expect(vpBox.x + vpBox.w).toBeLessThanOrEqual(200 + 1); // MINIMAP_W
+    expect(vpBox.y + vpBox.h).toBeLessThanOrEqual(140 + 1); // MINIMAP_H
+
+    // Scale shouldn't have collapsed — first node radius should still be in the
+    // same ballpark (allow a small tolerance for simulation drift).
+    const scaleAfter = await page.$eval('loco-module-graph svg.minimap', (svg) => {
+      const stop = svg.querySelector<SVGCircleElement>('circle');
+      return stop ? Number(stop.getAttribute('r')) : 0;
+    });
+    expect(scaleAfter).toBeGreaterThan(scaleBefore * 0.5);
+  });
+
   test('module graph shows a minimap; clicking it pans the main view', async ({ page }) => {
     await loadLocoSrc(page);
     await selectViz(page, 'Module graph');

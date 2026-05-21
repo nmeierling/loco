@@ -26,6 +26,7 @@ interface TileDatum {
   textColor: string;
   loc: number;
   complexity: number;
+  churn: number | null;
 }
 
 @Component({
@@ -71,11 +72,29 @@ interface TileDatum {
         </svg>
       }
 
-      @if (tip()) {
-        <div class="tip" [style.left.px]="tip()!.x" [style.top.px]="tip()!.y">
-          <div class="tip-path">{{ tip()!.path }}</div>
-          <div class="tip-row">LOC <strong>{{ tip()!.loc }}</strong></div>
-          <div class="tip-row">Complexity <strong>{{ tip()!.complexity }}</strong></div>
+      @if (tip(); as t) {
+        <div class="tip" [style.left.px]="t.x" [style.top.px]="t.y">
+          <div class="tip-path">{{ t.path }}</div>
+          <div class="tip-row">LOC <strong>{{ t.loc }}</strong></div>
+          <div class="tip-row">Complexity <strong>{{ t.complexity }}</strong></div>
+          @if (t.churn !== null) {
+            <div class="tip-row">Churn <strong>{{ t.churn }}</strong></div>
+          }
+        </div>
+      }
+
+      @if (legend(); as l) {
+        <div class="legend" aria-label="Color legend">
+          <div class="legend-label">color: complexity</div>
+          <div class="legend-bar">
+            @for (s of l.stops; track $index) {
+              <span class="legend-stop" [style.background]="s"></span>
+            }
+          </div>
+          <div class="legend-scale">
+            <span>{{ l.min }}</span>
+            <span>{{ l.max }}</span>
+          </div>
         </div>
       }
     </div>
@@ -126,6 +145,43 @@ interface TileDatum {
         justify-content: space-between;
         gap: 12px;
       }
+      .legend {
+        position: absolute;
+        top: 8px;
+        left: 8px;
+        padding: 6px 8px;
+        background: color-mix(in srgb, var(--bar-bg) 92%, transparent);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        font-size: 10px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        pointer-events: none;
+        z-index: 5;
+        line-height: 1.3;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+      }
+      .legend-label {
+        opacity: 0.65;
+        margin-bottom: 3px;
+        letter-spacing: 0.05em;
+      }
+      .legend-bar {
+        display: flex;
+        height: 8px;
+        width: 140px;
+        border-radius: 2px;
+        overflow: hidden;
+        border: 1px solid color-mix(in srgb, var(--fg) 15%, transparent);
+      }
+      .legend-stop {
+        flex: 1;
+      }
+      .legend-scale {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 2px;
+        opacity: 0.7;
+      }
     `,
   ],
 })
@@ -139,7 +195,8 @@ export class TreemapComponent implements AfterViewInit {
   readonly width = signal(0);
   readonly height = signal(0);
   readonly tiles = signal<TileDatum[]>([]);
-  readonly tip = signal<{ x: number; y: number; path: string; loc: number; complexity: number } | null>(
+  readonly legend = signal<{ stops: string[]; min: number; max: number } | null>(null);
+  readonly tip = signal<{ x: number; y: number; path: string; loc: number; complexity: number; churn: number | null } | null>(
     null,
   );
 
@@ -174,6 +231,7 @@ export class TreemapComponent implements AfterViewInit {
       path: isFile(t.node) ? t.node.path : t.node.path + '/',
       loc: t.loc,
       complexity: t.complexity,
+      churn: t.churn,
     });
   }
 
@@ -197,7 +255,10 @@ export class TreemapComponent implements AfterViewInit {
   }
 
   private layout(root: DirNode | null, metric: MetricKind, w: number, h: number): TileDatum[] {
-    if (!root || w <= 0 || h <= 0) return [];
+    if (!root || w <= 0 || h <= 0) {
+      this.legend.set(null);
+      return [];
+    }
 
     const sumValue = (n: TreeNode): number => (isFile(n) ? Math.max(metricValue(n, metric), 0) : 0);
 
@@ -205,7 +266,10 @@ export class TreemapComponent implements AfterViewInit {
       .sum(sumValue)
       .sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
 
-    if ((h0.value ?? 0) === 0) return [];
+    if ((h0.value ?? 0) === 0) {
+      this.legend.set(null);
+      return [];
+    }
 
     const tm = treemap<TreeNode>()
       .size([w, h])
@@ -225,6 +289,12 @@ export class TreemapComponent implements AfterViewInit {
       }
     });
     const color = scaleSequential(interpolateYlOrRd).domain([0, maxComplexity]);
+
+    // Publish a discretized version of the color scale for the legend.
+    const stops: string[] = [];
+    const STEPS = 12;
+    for (let i = 0; i <= STEPS; i++) stops.push(color((i / STEPS) * maxComplexity));
+    this.legend.set({ stops, min: 0, max: Math.round(maxComplexity) });
 
     const tiles: TileDatum[] = [];
     h0.leaves().forEach((n) => {
@@ -247,6 +317,7 @@ export class TreemapComponent implements AfterViewInit {
         textColor: textColorFor(fill),
         loc,
         complexity,
+        churn: file.metrics.churn,
       });
     });
     return tiles;

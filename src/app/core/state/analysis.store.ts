@@ -44,6 +44,26 @@ export class AnalysisStore {
     return out;
   });
 
+  /** True when at least one loaded file has a non-null churn value. */
+  readonly hasChurnData = computed<boolean>(() => {
+    const root = this.root();
+    if (!root) return false;
+    let found = false;
+    const visit = (n: TreeNode): void => {
+      if (found) return;
+      if (isFile(n)) {
+        if (n.metrics.churn !== null) found = true;
+      } else {
+        for (const c of n.children) {
+          if (found) return;
+          visit(c);
+        }
+      }
+    };
+    visit(root);
+    return found;
+  });
+
   setRoot(root: DirNode, rootName: string, blobs: ReadonlyMap<string, File>): void {
     this.root.set(root);
     this.rootName.set(rootName);

@@ -90,16 +90,9 @@ export class DirectoryLoaderService {
     if (!dt) return null;
     const items = Array.from(dt.items) as DTItemWithHandle[];
 
-    for (const item of items) {
-      if (item.kind !== 'file') continue;
-      if (item.getAsFileSystemHandle) {
-        const handle = await item.getAsFileSystemHandle();
-        if (handle && isDirHandle(handle)) {
-          return this.fromDirHandle(handle, onProgress);
-        }
-      }
-    }
-
+    // PREFER webkitGetAsEntry: Chromium's FS Access iterator silently strips dotfiles
+    // (so .git/, .gitignore, .env, etc. never reach us), and we need those for
+    // git churn + .gitignore handling. The legacy entry API includes them.
     for (const item of items) {
       if (item.kind !== 'file') continue;
       const entry = item.webkitGetAsEntry?.() as unknown as FSEntry | null;
@@ -108,6 +101,18 @@ export class DirectoryLoaderService {
         await this.walkFsDirChildren(entry, '', files, onProgress);
         onProgress?.(files.length);
         return { rootName: entry.name, files };
+      }
+    }
+
+    // Only fall back to FS Access handles if the entry API isn't available
+    // (some non-Chromium browsers). Dotfiles will be missing in that case.
+    for (const item of items) {
+      if (item.kind !== 'file') continue;
+      if (item.getAsFileSystemHandle) {
+        const handle = await item.getAsFileSystemHandle();
+        if (handle && isDirHandle(handle)) {
+          return this.fromDirHandle(handle, onProgress);
+        }
       }
     }
 
