@@ -11,6 +11,12 @@
   --accent: #6aa3ff;
   --accent-fg: #0b1020;
   --danger: #ff6b6b;
+
+  --tok-comment: #6a737d;
+  --tok-keyword: #c594c5;
+  --tok-string: #f0b27a;
+  --tok-number: #f5cd6b;
+  --tok-ident: #cdd5e0;
 }
 
 @media (prefers-color-scheme: light) {
@@ -27,6 +33,12 @@
     --accent: #3b82f6;
     --accent-fg: #ffffff;
     --danger: #d93636;
+
+    --tok-comment: #6a737d;
+    --tok-keyword: #8250df;
+    --tok-string: #ad6800;
+    --tok-number: #cf3e2e;
+    --tok-ident: #1a1a1a;
   }
 }
 

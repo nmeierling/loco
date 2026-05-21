@@ -1,26 +1,41 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  ElementRef,
   Input,
+  ViewChild,
+  computed,
   effect,
   inject,
   signal,
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { AnalysisStore } from '../core/state/analysis.store';
-import { AstNode, ComplexityService } from '../core/services/complexity.service';
+import { AstNode, ComplexityService, HighlightToken } from '../core/services/complexity.service';
 import { detectLanguage } from '../core/languages';
 import { AstSelectionService } from './ast-selection.service';
 import { SourcePanelComponent } from './source-panel.component';
 import { CallGraphComponent } from './call-graph.component';
 import { isCallGraphSupported } from '../core/services/call-graph';
 
+const SPLIT_KEY = 'loco:ast-split';
+const SPLIT_MIN = 0.15;
+const SPLIT_MAX = 0.85;
+
 type LoadState =
   | { kind: 'idle' }
   | { kind: 'loading'; path: string }
   | { kind: 'unsupported'; path: string; language: string | null }
   | { kind: 'error'; path: string; message: string }
-  | { kind: 'ready'; path: string; language: string; languageId: string; root: AstNode; text: string };
+  | {
+      kind: 'ready';
+      path: string;
+      language: string;
+      languageId: string;
+      root: AstNode;
+      text: string;
+      tokens: readonly HighlightToken[];
+    };
 
 @Component({
   selector: 'loco-ast-node',
@@ -189,7 +204,7 @@ export class AstNodeComponent {
           </div>
           <span class="caption">{{ mode() === 'tree' ? 'Click an AST node to jump to source.' : 'Click a function to jump to source.' }}</span>
         </header>
-        <div class="split">
+        <div class="split" #splitWrap [style.grid-template-columns]="splitTemplate()">
           @if (mode() === 'tree') {
             <div class="ast-scroll">
               @if (stateReadyRoot(); as root) {
@@ -201,7 +216,13 @@ export class AstNodeComponent {
               <loco-call-graph [ast]="stateReadyRoot()" [languageId]="stateReadyLangId()" />
             </div>
           }
-          <loco-source-panel [text]="stateReadyText()" />
+          <div
+            class="divider"
+            role="separator"
+            aria-orientation="vertical"
+            (mousedown)="onDividerDown($event)"
+          ></div>
+          <loco-source-panel [text]="stateReadyText()" [tokensInput]="stateReadyTokens()" />
         </div>
       }
     }
@@ -235,14 +256,37 @@ export class AstNodeComponent {
       .split {
         flex: 1;
         display: grid;
-        grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.2fr);
+        grid-template-columns: 45% 6px 1fr;
         min-height: 0;
+        min-width: 0;
       }
       .ast-scroll {
         overflow: auto;
         padding: 8px 12px;
-        border-right: 1px solid var(--border);
         min-height: 0;
+        min-width: 0;
+      }
+      .divider {
+        cursor: col-resize;
+        position: relative;
+        user-select: none;
+        background: transparent;
+      }
+      .divider::after {
+        content: '';
+        position: absolute;
+        left: 50%;
+        top: 0;
+        bottom: 0;
+        width: 1px;
+        background: var(--border);
+        transform: translateX(-0.5px);
+      }
+      .divider:hover::after,
+      .divider.dragging::after {
+        background: var(--accent);
+        width: 2px;
+        transform: translateX(-1px);
       }
       .spacer {
         flex: 1;
@@ -313,7 +357,39 @@ export class AstViewComponent {
   private readonly complexity = inject(ComplexityService);
   private readonly selection = inject(AstSelectionService);
 
+  @ViewChild('splitWrap', { static: false }) splitWrap?: ElementRef<HTMLDivElement>;
+
   readonly state = signal<LoadState>({ kind: 'idle' });
+
+  readonly splitFraction = signal<number>(loadSplitFraction());
+  readonly splitTemplate = computed(() => `${(this.splitFraction() * 100).toFixed(2)}% 6px 1fr`);
+
+  onDividerDown(ev: MouseEvent): void {
+    if (!this.splitWrap) return;
+    ev.preventDefault();
+    const wrap = this.splitWrap.nativeElement;
+    const target = ev.currentTarget as HTMLElement;
+    target.classList.add('dragging');
+    const onMove = (e: MouseEvent): void => {
+      const rect = wrap.getBoundingClientRect();
+      if (rect.width === 0) return;
+      const x = e.clientX - rect.left;
+      const f = Math.max(SPLIT_MIN, Math.min(SPLIT_MAX, x / rect.width));
+      this.splitFraction.set(f);
+    };
+    const onUp = (): void => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+      target.classList.remove('dragging');
+      saveSplitFraction(this.splitFraction());
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+  }
 
   constructor() {
     effect(() => {
@@ -342,7 +418,10 @@ export class AstViewComponent {
     }
     try {
       const text = await file.text();
-      const root = await this.complexity.parse(text, lang.id);
+      const [root, tokens] = await Promise.all([
+        this.complexity.parse(text, lang.id),
+        this.complexity.highlight(text, lang.id),
+      ]);
       if (!root) {
         this.state.set({
           kind: 'error',
@@ -351,7 +430,15 @@ export class AstViewComponent {
         });
         return;
       }
-      this.state.set({ kind: 'ready', path, language: lang.name, languageId: lang.id, root, text });
+      this.state.set({
+        kind: 'ready',
+        path,
+        language: lang.name,
+        languageId: lang.id,
+        root,
+        text,
+        tokens: tokens ?? [],
+      });
     } catch (e) {
       this.state.set({
         kind: 'error',
@@ -364,6 +451,10 @@ export class AstViewComponent {
   stateReadyText(): string {
     const s = this.state();
     return s.kind === 'ready' ? s.text : '';
+  }
+  stateReadyTokens(): readonly HighlightToken[] {
+    const s = this.state();
+    return s.kind === 'ready' ? s.tokens : [];
   }
   stateReadyLangId(): string | null {
     const s = this.state();
@@ -408,5 +499,26 @@ export class AstViewComponent {
   stateReadyRoot(): AstNode | null {
     const s = this.state();
     return s.kind === 'ready' ? s.root : null;
+  }
+}
+
+function loadSplitFraction(): number {
+  try {
+    const raw = localStorage.getItem(SPLIT_KEY);
+    if (raw) {
+      const v = Number(raw);
+      if (Number.isFinite(v) && v >= SPLIT_MIN && v <= SPLIT_MAX) return v;
+    }
+  } catch {
+    /* localStorage unavailable */
+  }
+  return 0.45;
+}
+
+function saveSplitFraction(v: number): void {
+  try {
+    localStorage.setItem(SPLIT_KEY, String(v));
+  } catch {
+    /* ignore */
   }
 }

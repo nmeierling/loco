@@ -5,6 +5,7 @@ import {
   DestroyRef,
   ElementRef,
   ViewChild,
+  computed,
   effect,
   inject,
   signal,
@@ -14,7 +15,13 @@ import { HierarchyRectangularNode, hierarchy, treemap, treemapSquarify } from 'd
 import { interpolateYlOrRd } from 'd3-scale-chromatic';
 import { scaleSequential } from 'd3-scale';
 import { AnalysisStore } from '../../core/state/analysis.store';
-import { DirNode, MetricKind, TreeNode, isDir, isFile, metricValue } from '../../core/models/tree';
+import { IgnoreService } from '../../core/services/ignore.service';
+import { DirNode, MetricKind, TreeNode, fileCount, isDir, isFile, metricValue } from '../../core/models/tree';
+
+type EmptyReason =
+  | { kind: 'no-project' }
+  | { kind: 'no-matches'; canClearFilters: boolean; userIgnoreCount: number }
+  | { kind: 'no-data'; metric: MetricKind };
 
 interface TileDatum {
   node: TreeNode;
@@ -35,8 +42,34 @@ interface TileDatum {
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="wrap" #wrap>
-      @if (tiles().length === 0) {
-        <div class="empty">Drop a folder to analyze.</div>
+      @if (emptyReason(); as e) {
+        <div class="empty">
+          @switch (e.kind) {
+            @case ('no-project') {
+              <p>Drop a folder to analyze.</p>
+            }
+            @case ('no-matches') {
+              <p class="empty-title">No files match the current filters.</p>
+              <p class="empty-hint">
+                Filters are applied across the heatmap, sidebar, and other vizzes.
+                @if (e.userIgnoreCount > 0) {
+                  {{ e.userIgnoreCount }} custom ignore
+                  {{ e.userIgnoreCount === 1 ? 'pattern is' : 'patterns are' }}
+                  active — review them in the right panel if needed.
+                }
+              </p>
+              @if (e.canClearFilters) {
+                <button type="button" class="clear-filters" (click)="clearFilters()">
+                  Clear name &amp; path filters
+                </button>
+              }
+            }
+            @case ('no-data') {
+              <p class="empty-title">No {{ e.metric }} values for the visible files.</p>
+              <p class="empty-hint">Try switching the metric in the toolbar.</p>
+            }
+          }
+        </div>
       } @else {
         <svg [attr.width]="width()" [attr.height]="height()">
           @for (t of tiles(); track t.node.path) {
@@ -113,9 +146,43 @@ interface TileDatum {
         overflow: hidden;
       }
       .empty {
-        padding: 1rem;
-        opacity: 0.5;
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
         text-align: center;
+        gap: 8px;
+        opacity: 0.85;
+      }
+      .empty p {
+        margin: 0;
+        max-width: 420px;
+      }
+      .empty-title {
+        font-weight: 500;
+      }
+      .empty-hint {
+        opacity: 0.65;
+        font-size: 12px;
+        line-height: 1.45;
+      }
+      .clear-filters {
+        background: transparent;
+        color: inherit;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 4px 12px;
+        font-size: 12px;
+        font-family: inherit;
+        cursor: pointer;
+        margin-top: 4px;
+      }
+      .clear-filters:hover {
+        border-color: var(--accent);
+        color: var(--accent);
       }
       .tile {
         cursor: pointer;
@@ -187,6 +254,7 @@ interface TileDatum {
 })
 export class TreemapComponent implements AfterViewInit {
   private readonly store = inject(AnalysisStore);
+  private readonly ig = inject(IgnoreService);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
 
@@ -199,6 +267,31 @@ export class TreemapComponent implements AfterViewInit {
   readonly tip = signal<{ x: number; y: number; path: string; loc: number; complexity: number; churn: number | null } | null>(
     null,
   );
+
+  readonly emptyReason = computed<EmptyReason | null>(() => {
+    if (this.tiles().length > 0) return null;
+    const root = this.store.root();
+    if (!root) return { kind: 'no-project' };
+    const filtered = this.store.filteredRoot();
+    const visibleFiles = filtered ? fileCount(filtered) : 0;
+    if (visibleFiles === 0) {
+      const f = this.store.filters();
+      const userIgnoreCount = this.ig.userPatterns().length;
+      return {
+        kind: 'no-matches',
+        canClearFilters: !!(f.name || f.path),
+        userIgnoreCount,
+      };
+    }
+    // We have visible files but the metric value sum is 0 (e.g. churn with no
+    // churn data, or all files at LOC=0). The chip disabling already prevents
+    // most of these, but it's still possible for narrow filtered subsets.
+    return { kind: 'no-data', metric: this.store.filters().metric };
+  });
+
+  clearFilters(): void {
+    this.store.updateFilters({ name: '', path: '' });
+  }
 
   constructor() {
     effect(() => {

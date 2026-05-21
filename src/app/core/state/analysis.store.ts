@@ -25,7 +25,11 @@ export class AnalysisStore {
     if (!name && !path && !userIg) return root;
     const matcher = userIg ? (p: string) => userIg.ignores(p) : null;
     const filtered = applyFilters(root, name.toLowerCase(), path.toLowerCase(), matcher);
-    return filtered && isDir(filtered) ? filtered : root;
+    if (filtered && isDir(filtered)) return filtered;
+    // Filters eat everything — return an empty wrapper so vizzes can show a
+    // tailored "no matches" empty state instead of silently rendering the
+    // full unfiltered tree.
+    return { ...root, children: [] };
   });
 
   /** Set of file paths that survive name + path + user-ignore filters. Used by repo-wide vizzes. */

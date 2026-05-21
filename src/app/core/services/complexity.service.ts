@@ -1,8 +1,9 @@
 import { Injectable } from '@angular/core';
 import { LANG_MAP, SUPPORTED_LANG_IDS } from './treesitter-langs';
-import type { AstNodeWire } from '../workers/ast.worker';
+import type { AstNodeWire, HighlightTokenWire } from '../workers/ast.worker';
 
 export type AstNode = AstNodeWire;
+export type HighlightToken = HighlightTokenWire;
 
 export interface ComplexityProvider {
   readonly id: string;
@@ -11,6 +12,8 @@ export interface ComplexityProvider {
   compute(text: string, languageId: string | null): Promise<number | null>;
   /** Returns a JSON-serializable AST snapshot, or null if not supported. */
   parse(text: string, languageId: string | null): Promise<AstNode | null>;
+  /** Returns a flat list of leaf tokens with their positions + classified kind. */
+  highlight(text: string, languageId: string | null): Promise<HighlightToken[] | null>;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -37,6 +40,11 @@ export class ComplexityService {
   async parse(text: string, languageId: string | null): Promise<AstNode | null> {
     if (!this.provider) return null;
     return this.provider.parse(text, languageId);
+  }
+
+  async highlight(text: string, languageId: string | null): Promise<HighlightToken[] | null> {
+    if (!this.provider) return null;
+    return this.provider.highlight(text, languageId);
   }
 }
 
@@ -89,6 +97,12 @@ export class WorkerTreeSitterProvider implements ComplexityProvider {
     return v ? (v as AstNode) : null;
   }
 
+  async highlight(text: string, languageId: string | null): Promise<HighlightToken[] | null> {
+    if (!languageId || !LANG_MAP[languageId]) return null;
+    const v = await this.send('highlight', { text, langId: languageId });
+    return Array.isArray(v) ? (v as HighlightToken[]) : null;
+  }
+
   private ensureWorker(): Worker {
     if (this.worker) return this.worker;
     const w = new Worker(new URL('../workers/ast.worker.ts', import.meta.url), { type: 'module' });
@@ -106,7 +120,10 @@ export class WorkerTreeSitterProvider implements ComplexityProvider {
     return w;
   }
 
-  private send(type: 'parse' | 'compute', payload: { text: string; langId: string }): Promise<unknown> {
+  private send(
+    type: 'parse' | 'compute' | 'highlight',
+    payload: { text: string; langId: string },
+  ): Promise<unknown> {
     const w = this.ensureWorker();
     const id = this.nextId++;
     return new Promise<unknown>((resolve, reject) => {
