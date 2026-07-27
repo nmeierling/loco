@@ -1,11 +1,4 @@
-import {
-  ChangeDetectionStrategy,
-  Component,
-  Input,
-  computed,
-  inject,
-  signal,
-} from '@angular/core';
+import { ChangeDetectionStrategy, Component, Input, computed, inject, signal } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { Router } from '@angular/router';
 import { AnalysisStore } from '../core/state/analysis.store';
@@ -34,7 +27,13 @@ import { DirNode, MetricKind, TreeNode, isDir, isFile, metricValue } from '../co
             aria-label="Filter by this directory"
           >
             <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">
-              <path d="M1.5 2.5h13l-5 6.2v4l-3-1v-3l-5-6.2z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
+              <path
+                d="M1.5 2.5h13l-5 6.2v4l-3-1v-3l-5-6.2z"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.4"
+                stroke-linejoin="round"
+              />
             </svg>
           </button>
         }
@@ -286,16 +285,11 @@ export class DirectoryTreeComponent {
   );
 
   readonly emptyMessage = computed(() =>
-    this.astMode()
-      ? 'No AST-supported files in this project.'
-      : 'No tree loaded.',
+    this.astMode() ? 'No AST-supported files in this project.' : 'No tree loaded.',
   );
 }
 
-function pruneToSupported(
-  node: TreeNode,
-  complexity: ComplexityService,
-): TreeNode | null {
+function pruneToSupported(node: TreeNode, complexity: ComplexityService): TreeNode | null {
   if (isFile(node)) {
     const lang = detectLanguage(node.name);
     return lang && complexity.supports(lang.id) ? node : null;

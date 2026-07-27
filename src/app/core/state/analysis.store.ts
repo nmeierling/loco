@@ -1,6 +1,6 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { DirNode, TreeNode, isDir, isFile } from '../models/tree';
-import { AnalysisPhase, ChurnState } from '../models/analysis';
+import { AnalysisPhase, ChurnState, RiskState } from '../models/analysis';
 import { DEFAULT_FILTERS, Filters } from '../models/filters';
 import { IgnoreService } from '../services/ignore.service';
 
@@ -12,6 +12,7 @@ export class AnalysisStore {
   readonly rootName = signal<string>('');
   readonly status = signal<AnalysisPhase>({ phase: 'idle' });
   readonly churn = signal<ChurnState>({ status: 'unavailable' });
+  readonly risk = signal<RiskState>({ status: 'idle' });
   /**
    * Bumped once per loaded project. Background refinements (churn) replace the root
    * node without touching this, so vizzes that cache expensive derived data — the
@@ -75,6 +76,20 @@ export class AnalysisStore {
     return found;
   });
 
+  /** Applies risk scores to the tree, same in-place rewrite as churn. */
+  applyRisk(byPath: ReadonlyMap<string, number>): void {
+    const root = this.root();
+    if (!root) return;
+    const rewrite = (n: TreeNode): TreeNode => {
+      if (isFile(n)) {
+        const r = byPath.get(n.path);
+        return r === undefined ? n : { ...n, metrics: { ...n.metrics, risk: r } };
+      }
+      return { ...n, children: n.children.map(rewrite) };
+    };
+    this.root.set(rewrite(root) as DirNode);
+  }
+
   /** True while git history is still being walked — the churn column has no values yet. */
   readonly churnPending = computed<boolean>(() => {
     const s = this.churn().status;
@@ -125,6 +140,7 @@ export class AnalysisStore {
     this.rootName.set('');
     this.status.set({ phase: 'idle' });
     this.churn.set({ status: 'unavailable' });
+    this.risk.set({ status: 'idle' });
     this.filters.set(DEFAULT_FILTERS);
     this.selectedPath.set(null);
     this.fileBlobs.set(new Map());

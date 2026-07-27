@@ -1,9 +1,15 @@
-export type MetricKind = 'loc' | 'complexity' | 'churn';
+export type MetricKind = 'loc' | 'complexity' | 'churn' | 'risk';
 
 export interface FileMetrics {
   loc: number | null;
   complexity: number | null;
   churn: number | null;
+  /**
+   * 0-100 composite of complexity, how many files import this one, and how often it
+   * changes. Computed on demand — it needs the module graph — so it stays null until
+   * the metric is asked for.
+   */
+  risk: number | null;
 }
 
 export interface FileNode {

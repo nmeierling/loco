@@ -32,14 +32,26 @@ describe('extractCallGraph', () => {
     // Synthesized AST resembling:
     //   function foo() { bar(); }
     //   function bar() {}
-    const fooBody = node('statement_block', '', [
-      node('expression_statement', '', [
-        node('call_expression', 'bar()', [
-          node('identifier', 'bar'),
-          node('arguments', '()'),
-        ], [2, 2]),
-      ], [2, 2]),
-    ], [1, 3]);
+    const fooBody = node(
+      'statement_block',
+      '',
+      [
+        node(
+          'expression_statement',
+          '',
+          [
+            node(
+              'call_expression',
+              'bar()',
+              [node('identifier', 'bar'), node('arguments', '()')],
+              [2, 2],
+            ),
+          ],
+          [2, 2],
+        ),
+      ],
+      [1, 3],
+    );
 
     const fooDecl = node(
       'function_declaration',
@@ -51,7 +63,11 @@ describe('extractCallGraph', () => {
     const barDecl = node(
       'function_declaration',
       'function bar() {}',
-      [node('identifier', 'bar'), node('formal_parameters', '()'), node('statement_block', '', [], [5, 5])],
+      [
+        node('identifier', 'bar'),
+        node('formal_parameters', '()'),
+        node('statement_block', '', [], [5, 5]),
+      ],
       [5, 5],
     );
 

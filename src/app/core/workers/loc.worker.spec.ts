@@ -40,10 +40,10 @@ describe('countLoc — code/blank/comment classification', () => {
 
   it('treats hash-comments as comments for Python', () => {
     const r = countLoc(
-      req(
-        ['# header', 'x = 1', '', '# trailing'].join('\n'),
-        { lineComment: ['#'], blockComment: null },
-      ),
+      req(['# header', 'x = 1', '', '# trailing'].join('\n'), {
+        lineComment: ['#'],
+        blockComment: null,
+      }),
     );
     expect(r.loc).toBe(1);
     expect(r.comment).toBe(2);

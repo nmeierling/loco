@@ -42,7 +42,9 @@ interface FSFileEntry extends FSEntry {
   file(onSuccess: (f: File) => void, onError?: (e: unknown) => void): void;
 }
 interface FSDirEntry extends FSEntry {
-  createReader(): { readEntries(cb: (entries: FSEntry[]) => void, errCb?: (e: unknown) => void): void };
+  createReader(): {
+    readEntries(cb: (entries: FSEntry[]) => void, errCb?: (e: unknown) => void): void;
+  };
 }
 
 const isDirHandle = (h: AnyFSHandle): h is FSDirHandle => h.kind === 'directory';

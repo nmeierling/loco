@@ -7,9 +7,15 @@ import {
   input,
   signal,
 } from '@angular/core';
+import { NgTemplateOutlet } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { AnalysisStore } from '../core/state/analysis.store';
-import { SymbolDef, SymbolIndexService, SymbolRef } from '../core/services/symbol-index.service';
+import {
+  CallerEdge,
+  SymbolDef,
+  SymbolIndexService,
+  SymbolRef,
+} from '../core/services/symbol-index.service';
 import { isSymbolIndexSupported } from '../core/services/symbols';
 import { AstSelectionService } from './ast-selection.service';
 
@@ -38,7 +44,7 @@ const MAX_REFS = 300;
 @Component({
   selector: 'loco-usages-panel',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, NgTemplateOutlet],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="panel">
@@ -115,23 +121,58 @@ const MAX_REFS = 300;
 
               @if (isOpen(row.def.id)) {
                 <div class="refs">
-                  @for (g of groupsFor(row.def.id); track g.path) {
-                    <div class="ref-file">
-                      <span class="ref-path" [class.self]="g.path === path()">{{ g.label }}</span>
-                      <span class="ref-count">{{ g.refs.length }}</span>
-                    </div>
-                    @for (r of g.refs; track r.path + ':' + r.row + ':' + r.col) {
-                      <button type="button" class="ref" (click)="jump(r)">
-                        <span class="ref-line">{{ r.row + 1 }}</span>
-                        <span class="ref-kind" [attr.data-kind]="r.kind">{{ r.kind }}</span>
-                        <code>{{ r.line }}</code>
-                      </button>
+                  <div class="submodes">
+                    <button
+                      type="button"
+                      [class.active]="detail() === 'sites'"
+                      (click)="detail.set('sites')"
+                    >
+                      Call sites
+                    </button>
+                    <button
+                      type="button"
+                      [class.active]="detail() === 'impact'"
+                      (click)="detail.set('impact')"
+                      title="Walk outwards through the callers of this symbol"
+                    >
+                      Impact
+                    </button>
+                  </div>
+
+                  @if (detail() === 'sites') {
+                    @for (g of groupsFor(row.def.id); track g.path) {
+                      <div class="ref-file">
+                        <span class="ref-path" [class.self]="g.path === path()">{{ g.label }}</span>
+                        <span class="ref-count">{{ g.refs.length }}</span>
+                      </div>
+                      @for (r of g.refs; track r.path + ':' + r.row + ':' + r.col) {
+                        <button type="button" class="ref" (click)="jump(r)">
+                          <span class="ref-line">{{ r.row + 1 }}</span>
+                          <span class="ref-kind" [attr.data-kind]="r.kind">{{ r.kind }}</span>
+                          <code>{{ r.line }}</code>
+                        </button>
+                      }
                     }
-                  }
-                  @if (truncated(row.def.id)) {
-                    <div class="note small">
-                      Showing the first {{ maxRefs }} of {{ row.useCount }} references.
-                    </div>
+                    @if (truncated(row.def.id)) {
+                      <div class="note small">
+                        Showing the first {{ maxRefs }} of {{ row.useCount }} references.
+                      </div>
+                    }
+                  } @else {
+                    @if (callersOf(row.def.id).length === 0) {
+                      <div class="note small">
+                        Nothing calls this from inside another declaration — it is either an entry
+                        point or only referenced at file scope.
+                      </div>
+                    }
+                    @for (edge of callersOf(row.def.id); track edge.def.id) {
+                      <ng-container
+                        *ngTemplateOutlet="
+                          callerNode;
+                          context: { $implicit: edge, trail: [row.def.id], depth: 0 }
+                        "
+                      />
+                    }
                   }
                 </div>
               }
@@ -172,6 +213,51 @@ const MAX_REFS = 300;
         }
       }
     </div>
+
+    <!-- One level of the caller trace. Expanding a node asks the index for its own
+         callers, so the walk goes as deep as the user drags it and no further. -->
+    <ng-template #callerNode let-edge let-trail="trail" let-depth="depth">
+      <div class="caller" [style.paddingLeft.px]="depth * 10">
+        <div class="caller-row">
+          <button
+            type="button"
+            class="chev-btn"
+            [disabled]="trail.includes(edge.def.id) || !hasCallers(edge.def.id)"
+            (click)="toggle(trailKey(trail, edge.def.id))"
+          >
+            {{
+              trail.includes(edge.def.id) || !hasCallers(edge.def.id)
+                ? '·'
+                : isOpen(trailKey(trail, edge.def.id))
+                  ? '▾'
+                  : '▸'
+            }}
+          </button>
+          <button type="button" class="caller-head" (click)="jumpToDef(edge.def)">
+            <span class="kind" [attr.data-kind]="edge.def.kind">{{ edge.def.kind }}</span>
+            <span class="name">{{ qualified(edge.def) }}</span>
+            <span class="badge">{{ edge.refs.length }}×</span>
+            <span class="from">{{ edge.def.path }}</span>
+          </button>
+        </div>
+        @if (trail.includes(edge.def.id)) {
+          <div class="note small indent">cycle — already on this path</div>
+        } @else if (isOpen(trailKey(trail, edge.def.id))) {
+          @for (next of callersOf(edge.def.id); track next.def.id) {
+            <ng-container
+              *ngTemplateOutlet="
+                callerNode;
+                context: {
+                  $implicit: next,
+                  trail: trail.concat(edge.def.id),
+                  depth: depth + 1,
+                }
+              "
+            />
+          }
+        }
+      </div>
+    </ng-template>
   `,
   styles: [
     `
@@ -395,6 +481,74 @@ const MAX_REFS = 300;
       .ref.definition code {
         color: var(--accent);
       }
+      .submodes {
+        display: flex;
+        gap: 2px;
+        padding: 4px 8px 6px;
+      }
+      .submodes button {
+        background: transparent;
+        border: 1px solid var(--border);
+        color: inherit;
+        border-radius: 3px;
+        font: inherit;
+        font-size: 10px;
+        padding: 1px 7px;
+        cursor: pointer;
+      }
+      .submodes button.active {
+        background: var(--accent);
+        color: var(--accent-fg);
+        border-color: var(--accent);
+      }
+      .submodes button:hover:not(.active) {
+        background: var(--hover);
+      }
+      .caller-row {
+        display: flex;
+        align-items: center;
+      }
+      .chev-btn {
+        background: transparent;
+        border: none;
+        color: inherit;
+        font: inherit;
+        font-size: 10px;
+        opacity: 0.5;
+        width: 14px;
+        padding: 0;
+        cursor: pointer;
+        flex-shrink: 0;
+      }
+      .chev-btn:disabled {
+        cursor: default;
+        opacity: 0.25;
+      }
+      .chev-btn:hover:not(:disabled) {
+        opacity: 1;
+        color: var(--accent);
+      }
+      .caller-head {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex: 1;
+        min-width: 0;
+        text-align: left;
+        background: transparent;
+        border: none;
+        color: inherit;
+        font: inherit;
+        padding: 3px 6px;
+        cursor: pointer;
+        border-radius: 3px;
+      }
+      .caller-head:hover {
+        background: var(--hover);
+      }
+      .note.small.indent {
+        padding-left: 22px;
+      }
     `,
   ],
 })
@@ -409,7 +563,12 @@ export class UsagesPanelComponent {
   readonly maxRefs = MAX_REFS;
   readonly query = signal('');
   readonly tab = signal<'defined' | 'uses'>('defined');
+  readonly detail = signal<'sites' | 'impact'>('sites');
   private readonly open = signal<ReadonlySet<string>>(new Set());
+
+  /** Caller lookups are per-node and repeated during change detection; memoise them. */
+  private callerCache = new Map<string, CallerEdge[]>();
+  private callerCacheFor: unknown = null;
 
   readonly progress = this.index.building;
   readonly supported = computed(() => isSymbolIndexSupported(this.languageId()));
@@ -515,6 +674,30 @@ export class UsagesPanelComponent {
    * reflowing can never slip whitespace between the owner and the name. */
   qualified(def: SymbolDef): string {
     return def.owner ? `${def.owner}.${def.name}` : def.name;
+  }
+
+  /** Declarations that reach `defId`, one level out. */
+  callersOf(defId: string): CallerEdge[] {
+    const idx = this.index.index();
+    if (this.callerCacheFor !== idx) {
+      this.callerCache = new Map();
+      this.callerCacheFor = idx;
+    }
+    let edges = this.callerCache.get(defId);
+    if (!edges) {
+      edges = this.index.callers(defId);
+      this.callerCache.set(defId, edges);
+    }
+    return edges;
+  }
+
+  hasCallers(defId: string): boolean {
+    return this.callersOf(defId).length > 0;
+  }
+
+  /** Expansion is keyed by the path taken, so one symbol can appear on two branches. */
+  trailKey(trail: readonly string[], defId: string): string {
+    return `${trail.join('>')}>${defId}`;
   }
 
   isOpen(id: string): boolean {

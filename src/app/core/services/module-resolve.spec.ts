@@ -58,9 +58,9 @@ describe('resolveJsLike', () => {
   });
 
   it('resolves a folder import to its index file', () => {
-    expect(
-      resolveJsLike('../core/services', 'app/shell/shell.component.ts', files),
-    ).toBe('app/core/services/index.ts');
+    expect(resolveJsLike('../core/services', 'app/shell/shell.component.ts', files)).toBe(
+      'app/core/services/index.ts',
+    );
   });
 
   it('returns null for external package specifiers', () => {
@@ -74,12 +74,7 @@ describe('resolveJsLike', () => {
 });
 
 describe('resolvePython', () => {
-  const files = new Set([
-    'pkg/__init__.py',
-    'pkg/sub/__init__.py',
-    'pkg/sub/foo.py',
-    'pkg/bar.py',
-  ]);
+  const files = new Set(['pkg/__init__.py', 'pkg/sub/__init__.py', 'pkg/sub/foo.py', 'pkg/bar.py']);
 
   it('resolves a relative single-dot import to a sibling module', () => {
     expect(resolvePython('.foo', 'pkg/sub/__init__.py', files)).toBe('pkg/sub/foo.py');

@@ -19,27 +19,17 @@ function n(type: string, preview: string, children: AstNode[] = []): AstNode {
 
 describe('extractImports — Kotlin', () => {
   it('extracts a simple top-level class import', () => {
-    const ast = n('source_file', '', [
-      n('import_header', 'import com.example.Foo'),
-    ]);
-    expect(extractImports(ast, 'kt')).toEqual([
-      { specifier: 'com.example.Foo', relative: false },
-    ]);
+    const ast = n('source_file', '', [n('import_header', 'import com.example.Foo')]);
+    expect(extractImports(ast, 'kt')).toEqual([{ specifier: 'com.example.Foo', relative: false }]);
   });
 
   it('strips an `as` alias', () => {
-    const ast = n('source_file', '', [
-      n('import_header', 'import com.example.Foo as Bar'),
-    ]);
-    expect(extractImports(ast, 'kt')).toEqual([
-      { specifier: 'com.example.Foo', relative: false },
-    ]);
+    const ast = n('source_file', '', [n('import_header', 'import com.example.Foo as Bar')]);
+    expect(extractImports(ast, 'kt')).toEqual([{ specifier: 'com.example.Foo', relative: false }]);
   });
 
   it('skips wildcard imports (we do not edge to packages today)', () => {
-    const ast = n('source_file', '', [
-      n('import_header', 'import com.example.*'),
-    ]);
+    const ast = n('source_file', '', [n('import_header', 'import com.example.*')]);
     expect(extractImports(ast, 'kt')).toEqual([]);
   });
 
@@ -49,10 +39,11 @@ describe('extractImports — Kotlin', () => {
       n('import_header', 'import com.example.B'),
       n('import_header', 'import com.example.A'),
     ]);
-    expect(extractImports(ast, 'kt').map((i) => i.specifier).sort()).toEqual([
-      'com.example.A',
-      'com.example.B',
-    ]);
+    expect(
+      extractImports(ast, 'kt')
+        .map((i) => i.specifier)
+        .sort(),
+    ).toEqual(['com.example.A', 'com.example.B']);
   });
 });
 
@@ -78,9 +69,7 @@ describe('extractPackage — Kotlin', () => {
 
 describe('extractImports — Java', () => {
   it('extracts a simple class import (with trailing semicolon)', () => {
-    const ast = n('program', '', [
-      n('import_declaration', 'import com.example.Foo;'),
-    ]);
+    const ast = n('program', '', [n('import_declaration', 'import com.example.Foo;')]);
     expect(extractImports(ast, 'java')).toEqual([
       { specifier: 'com.example.Foo', relative: false },
     ]);
@@ -162,9 +151,7 @@ describe('buildJvmContext + resolveJvm', () => {
   const ctx: JvmResolveContext = buildJvmContext(packageByPath, declsByPath);
 
   it('resolves a class by its file stem (Bar.kt declares Bar)', () => {
-    expect(resolveJvm('com.example.foo.Bar', ctx)).toBe(
-      'src/main/kotlin/com/example/foo/Bar.kt',
-    );
+    expect(resolveJvm('com.example.foo.Bar', ctx)).toBe('src/main/kotlin/com/example/foo/Bar.kt');
   });
 
   it('resolves a class declared in a multi-class file (UserModel in Models.kt)', () => {

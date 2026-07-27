@@ -11,23 +11,12 @@ import {
   signal,
 } from '@angular/core';
 import { Router } from '@angular/router';
-import {
-  HierarchyRectangularNode,
-  hierarchy,
-  partition,
-} from 'd3-hierarchy';
+import { HierarchyRectangularNode, hierarchy, partition } from 'd3-hierarchy';
 import { arc as d3arc } from 'd3-shape';
 import { scaleOrdinal } from 'd3-scale';
 import { schemeTableau10 } from 'd3-scale-chromatic';
 import { AnalysisStore } from '../../core/state/analysis.store';
-import {
-  DirNode,
-  MetricKind,
-  TreeNode,
-  isDir,
-  isFile,
-  metricValue,
-} from '../../core/models/tree';
+import { DirNode, MetricKind, TreeNode, isDir, isFile, metricValue } from '../../core/models/tree';
 
 interface Segment {
   path: string;
@@ -84,7 +73,9 @@ interface Segment {
         @if (hovered(); as h) {
           <div class="tip" [style.left.px]="tipPos().x" [style.top.px]="tipPos().y">
             <div class="tip-path">{{ h.path || '(root)' }}</div>
-            <div class="tip-row">LOC <strong>{{ h.loc }}</strong></div>
+            <div class="tip-row">
+              LOC <strong>{{ h.loc }}</strong>
+            </div>
           </div>
         }
       }
@@ -196,20 +187,12 @@ export class SunburstComponent implements AfterViewInit {
     this.tipPos.set({ x: ev.clientX - rect.left, y: ev.clientY - rect.top });
   }
 
-  private layout(
-    root: DirNode | null,
-    metric: MetricKind,
-    w: number,
-    h: number,
-  ): Segment[] {
+  private layout(root: DirNode | null, metric: MetricKind, w: number, h: number): Segment[] {
     if (!root || w <= 0 || h <= 0) return [];
 
-    const sumValue = (n: TreeNode): number =>
-      isFile(n) ? Math.max(metricValue(n, metric), 0) : 0;
+    const sumValue = (n: TreeNode): number => (isFile(n) ? Math.max(metricValue(n, metric), 0) : 0);
 
-    const h0 = hierarchy<TreeNode>(root, (d) =>
-      isDir(d) ? d.children : null,
-    )
+    const h0 = hierarchy<TreeNode>(root, (d) => (isDir(d) ? d.children : null))
       .sum(sumValue)
       .sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
 

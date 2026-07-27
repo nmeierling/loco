@@ -75,6 +75,53 @@ test.describe('AST usages panel', () => {
     );
   });
 
+  test('identifiers in the source pane link to their declaration', async ({ page }) => {
+    await loadFixture(page);
+    await openInAst(page, 'cart.component');
+
+    const links = page.locator('loco-source-panel .tok.link');
+    await expect(links.first()).toBeVisible();
+    // The imported store and the method called on it are both resolved.
+    await expect(links.filter({ hasText: 'CatalogStore' }).first()).toBeVisible();
+
+    const target = links.filter({ hasText: 'selectProduct' }).first();
+    await expect(target).toHaveAttribute('title', /catalog\.store\.ts:\d+/);
+    await target.click();
+
+    await expect(page.locator('loco-ast-view .path')).toHaveText('app/core/state/catalog.store.ts');
+    // Landed on the declaration itself, not just the file.
+    const highlighted = page.locator('loco-source-panel .row.highlighted');
+    await expect(highlighted.first()).toBeVisible();
+    await expect(highlighted.first()).toContainText('selectProduct');
+  });
+
+  test('the impact tab walks outwards through callers', async ({ page }) => {
+    await loadFixture(page);
+    await openInAst(page, 'catalog.store');
+    await page.locator('loco-ast-view .mode', { hasText: 'Usages' }).click();
+    await page.locator('loco-usages-panel .sym-head', { hasText: 'selectProduct' }).first().click();
+    await page.locator('loco-usages-panel .submodes button', { hasText: 'Impact' }).click();
+
+    // First level: the methods that call it.
+    const callers = page.locator('loco-usages-panel .caller-head');
+    await expect(callers.first()).toBeVisible();
+    const firstLevel = await callers.count();
+    expect(firstLevel).toBeGreaterThan(3);
+    await expect(callers.filter({ hasText: 'CheckoutComponent.confirm' })).toHaveCount(1);
+
+    // Second level: bootstrap reaches selectProduct through confirm().
+    await page
+      .locator('loco-usages-panel .caller-row', { hasText: 'CheckoutComponent.confirm' })
+      .locator('.chev-btn')
+      .click();
+    await expect.poll(() => callers.count()).toBeGreaterThan(firstLevel);
+    await expect(callers.filter({ hasText: 'bootstrap' }).first()).toBeVisible();
+
+    // Clicking a caller navigates to it.
+    await callers.filter({ hasText: 'bootstrap' }).first().click();
+    await expect(page.locator('loco-ast-view .path')).toHaveText('app/app.ts');
+  });
+
   test('the Usages tab is disabled for a language with no symbol index', async ({ page }) => {
     await loadFixture(page);
     await openInAst(page, 'index.html');

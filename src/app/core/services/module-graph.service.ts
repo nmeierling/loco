@@ -28,6 +28,12 @@ export interface ModuleGraph {
   edges: GraphEdge[];
   unresolvedCount: number;
   externalCount: number;
+  /**
+   * Strongly connected components of size > 1 — groups of files that import each
+   * other, directly or through a chain. Every file in one can only be understood
+   * together with the rest.
+   */
+  cycles: string[][];
 }
 
 export interface GraphBuildProgress {
@@ -60,7 +66,13 @@ export class ModuleGraphService {
   async build(progress?: (p: GraphBuildProgress) => void): Promise<ModuleGraph> {
     const root = this.store.root();
     if (!root) {
-      const empty: ModuleGraph = { nodes: [], edges: [], unresolvedCount: 0, externalCount: 0 };
+      const empty: ModuleGraph = {
+        nodes: [],
+        edges: [],
+        unresolvedCount: 0,
+        externalCount: 0,
+        cycles: [],
+      };
       this._graph.set(empty);
       return empty;
     }
@@ -201,7 +213,16 @@ export class ModuleGraphService {
       };
     });
 
-    const graph: ModuleGraph = { nodes, edges, unresolvedCount, externalCount };
+    const graph: ModuleGraph = {
+      nodes,
+      edges,
+      unresolvedCount,
+      externalCount,
+      cycles: findCycles(
+        nodes.map((n) => n.path),
+        edges,
+      ),
+    };
     this._graph.set(graph);
     this.building.set(null);
     return graph;
@@ -212,6 +233,72 @@ export class ModuleGraphService {
     this.buildingFor = null;
     this.building.set(null);
   }
+}
+
+/**
+ * Tarjan's strongly connected components, iterative so a deep import chain cannot
+ * blow the stack. Only components with more than one file are returned: those are
+ * the import cycles.
+ */
+export function findCycles(paths: readonly string[], edges: readonly GraphEdge[]): string[][] {
+  const out = new Map<string, string[]>();
+  for (const p of paths) out.set(p, []);
+  for (const e of edges) out.get(e.from)?.push(e.to);
+
+  const index = new Map<string, number>();
+  const low = new Map<string, number>();
+  const onStack = new Set<string>();
+  const stack: string[] = [];
+  const cycles: string[][] = [];
+  let counter = 0;
+
+  for (const start of paths) {
+    if (index.has(start)) continue;
+    // Each frame tracks how far through its successor list we have walked.
+    const work: { node: string; next: number }[] = [{ node: start, next: 0 }];
+    index.set(start, counter);
+    low.set(start, counter);
+    counter++;
+    stack.push(start);
+    onStack.add(start);
+
+    while (work.length > 0) {
+      const frame = work[work.length - 1]!;
+      const successors = out.get(frame.node) ?? [];
+      if (frame.next < successors.length) {
+        const child = successors[frame.next++]!;
+        if (!index.has(child)) {
+          index.set(child, counter);
+          low.set(child, counter);
+          counter++;
+          stack.push(child);
+          onStack.add(child);
+          work.push({ node: child, next: 0 });
+        } else if (onStack.has(child)) {
+          low.set(frame.node, Math.min(low.get(frame.node)!, index.get(child)!));
+        }
+        continue;
+      }
+
+      work.pop();
+      const parent = work[work.length - 1];
+      if (parent) {
+        low.set(parent.node, Math.min(low.get(parent.node)!, low.get(frame.node)!));
+      }
+      if (low.get(frame.node) === index.get(frame.node)) {
+        const component: string[] = [];
+        for (;;) {
+          const popped = stack.pop()!;
+          onStack.delete(popped);
+          component.push(popped);
+          if (popped === frame.node) break;
+        }
+        if (component.length > 1) cycles.push(component.sort());
+      }
+    }
+  }
+
+  return cycles.sort((a, b) => b.length - a.length || (a[0] ?? '').localeCompare(b[0] ?? ''));
 }
 
 /**
@@ -254,4 +341,3 @@ export function buildJvmContext(
 
   return { pkgIndex, pkgFiles };
 }
-

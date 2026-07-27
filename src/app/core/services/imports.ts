@@ -21,7 +21,10 @@ export function extractImports(ast: AstNode, languageId: string): RawImport[] {
     const s = raw.replace(/^['"`]/, '').replace(/['"`]$/, '');
     if (!s || pushed.has(s)) return;
     pushed.add(s);
-    out.push({ specifier: s, relative: s.startsWith('./') || s.startsWith('../') || s.startsWith('/') });
+    out.push({
+      specifier: s,
+      relative: s.startsWith('./') || s.startsWith('../') || s.startsWith('/'),
+    });
   };
 
   const visit = walk;
@@ -91,9 +94,7 @@ export function extractImports(ast: AstNode, languageId: string): RawImport[] {
           // preview looks like: 'import com.example.Foo;', 'import static com.example.Utils.bar;',
           // or 'import com.example.foo.*;'. Static imports point at a class member; the dotted
           // path still includes the enclosing class, so the same walk-up resolver handles them.
-          const m = n.preview.match(
-            /^\s*import\s+(?:static\s+)?(\w+(?:\.\w+)*)(\.\*)?\s*;?/,
-          );
+          const m = n.preview.match(/^\s*import\s+(?:static\s+)?(\w+(?:\.\w+)*)(\.\*)?\s*;?/);
           if (m && m[1] && !m[2]) push(m[1]);
         }
       });
@@ -104,7 +105,7 @@ export function extractImports(ast: AstNode, languageId: string): RawImport[] {
         if (n.type === 'import_statement') {
           for (const c of n.children) {
             if (c.type === 'dotted_name' || c.type === 'aliased_import') {
-              const name = c.type === 'aliased_import' ? c.children[0]?.preview ?? '' : c.preview;
+              const name = c.type === 'aliased_import' ? (c.children[0]?.preview ?? '') : c.preview;
               if (name) push(name);
             }
           }
@@ -157,11 +158,7 @@ const JVM_TOP_LEVEL_DECL_NODES = new Set([
   'record_declaration',
 ]);
 
-const JVM_IDENTIFIER_NODES = new Set([
-  'identifier',
-  'type_identifier',
-  'simple_identifier',
-]);
+const JVM_IDENTIFIER_NODES = new Set(['identifier', 'type_identifier', 'simple_identifier']);
 
 /** Returns the package declaration of a file, if the language has one (Kotlin + Java today). */
 export function extractPackage(ast: AstNode, languageId: string): string | null {

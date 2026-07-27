@@ -17,7 +17,10 @@ export interface FsStat {
 
 export interface GitFs {
   promises: {
-    readFile(filepath: string, options?: { encoding?: string } | string): Promise<Uint8Array | string>;
+    readFile(
+      filepath: string,
+      options?: { encoding?: string } | string,
+    ): Promise<Uint8Array | string>;
     readdir(filepath: string): Promise<string[]>;
     stat(filepath: string): Promise<FsStat>;
     lstat(filepath: string): Promise<FsStat>;
@@ -94,10 +97,7 @@ export function makeGitFs(files: ReadonlyMap<string, File>): GitFs {
         const file = files.get(p);
         if (!file) throw enoent(filepath);
         const buf = new Uint8Array(await file.arrayBuffer());
-        const encoding =
-          typeof options === 'string'
-            ? options
-            : (options?.encoding ?? null);
+        const encoding = typeof options === 'string' ? options : (options?.encoding ?? null);
         if (encoding === 'utf8' || encoding === 'utf-8') {
           return new TextDecoder('utf-8').decode(buf);
         }

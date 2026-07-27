@@ -5,6 +5,7 @@ import { AnalysisStore } from '../core/state/analysis.store';
 import { routeUrlSignal } from '../core/state/route-url';
 import { MetricKind, fileCount, metricValue } from '../core/models/tree';
 import { VizRegistry } from '../viz/viz-registry';
+import { RiskService } from '../core/services/risk.service';
 
 interface MetricOption {
   id: MetricKind;
@@ -51,7 +52,7 @@ interface MetricOption {
             (click)="setMetric(m.id)"
           >
             {{ m.label }}
-            @if (m.id === 'churn' && churnPending()) {
+            @if ((m.id === 'churn' && churnPending()) || (m.id === 'risk' && riskPending())) {
               <span class="dot" aria-label="computing"></span>
             }
           </button>
@@ -208,6 +209,7 @@ interface MetricOption {
 export class FilterBarComponent {
   private readonly store = inject(AnalysisStore);
   private readonly registry = inject(VizRegistry);
+  private readonly risk = inject(RiskService);
 
   readonly filters = this.store.filters;
 
@@ -215,12 +217,15 @@ export class FilterBarComponent {
     { id: 'loc', label: 'LOC' },
     { id: 'complexity', label: 'Complexity' },
     { id: 'churn', label: 'Churn' },
+    { id: 'risk', label: 'Risk' },
   ];
 
   readonly hasChurnData = this.store.hasChurnData;
   readonly churnPending = this.store.churnPending;
+  readonly riskPending = computed(() => this.store.risk().status === 'computing');
 
   isMetricDisabled(id: MetricKind): boolean {
+    if (id === 'risk') return this.store.risk().status === 'error';
     // Selectable as soon as we know a .git/ is there — the viz shows its own
     // progress state until the history walk lands.
     if (id === 'churn') return !this.store.churnOffered();
@@ -228,6 +233,7 @@ export class FilterBarComponent {
   }
 
   metricTitle(id: MetricKind): string {
+    if (id === 'risk') return this.riskTitle();
     if (id !== 'churn') return '';
     const c = this.store.churn();
     if (c.status === 'running') {
@@ -271,6 +277,22 @@ export class FilterBarComponent {
   }
   setMetric(metric: MetricKind): void {
     this.store.updateFilters({ metric });
+    // Risk needs the module graph, which is too expensive to build up front — so the
+    // first time it is asked for, it is computed.
+    if (metric === 'risk') void this.risk.ensure();
+  }
+
+  private riskTitle(): string {
+    const r = this.store.risk();
+    if (r.status === 'computing') return 'Building the dependency graph to score risk…';
+    if (r.status === 'error') return `Risk unavailable: ${r.message}`;
+    if (r.status === 'ready') {
+      const parts = ['complexity'];
+      if (r.usedFanIn) parts.push('how many files import it');
+      if (r.usedChurn) parts.push('how often it changes');
+      return `0-100 score combining ${parts.join(', ')}.`;
+    }
+    return 'Combines complexity, fan-in and churn into one 0-100 score. Click to compute.';
   }
   setViz(id: string): void {
     this.registry.select(id);

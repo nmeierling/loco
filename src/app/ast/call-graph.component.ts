@@ -129,12 +129,9 @@ interface RenderLink {
         </svg>
 
         <div class="legend">
-          <span class="dot" style="background:#3b82f6"></span>function
-          &nbsp;
-          <span class="dot" style="background:#f59e0b"></span>method
-          &nbsp;
-          <span class="dot" style="background:#10b981"></span>arrow
-          &nbsp;
+          <span class="dot" style="background:#3b82f6"></span>function &nbsp;
+          <span class="dot" style="background:#f59e0b"></span>method &nbsp;
+          <span class="dot" style="background:#10b981"></span>arrow &nbsp;
           <span class="dot" style="background:#9ca3af"></span>module
         </div>
       }
@@ -286,7 +283,10 @@ export class CallGraphComponent implements AfterViewInit {
       )
       .force('charge', forceManyBody<SimNode>().strength(-200))
       .force('center', forceCenter(w / 2, h / 2))
-      .force('collide', forceCollide<SimNode>().radius((d) => d.r + 14))
+      .force(
+        'collide',
+        forceCollide<SimNode>().radius((d) => d.r + 14),
+      )
       .alphaDecay(0.04);
     this.sim = sim;
 
@@ -331,9 +331,13 @@ export class CallGraphComponent implements AfterViewInit {
 
 function colorFor(kind: CallGraphFunc['kind']): string {
   switch (kind) {
-    case 'function': return '#3b82f6';
-    case 'method': return '#f59e0b';
-    case 'arrow': return '#10b981';
-    case 'module': return '#9ca3af';
+    case 'function':
+      return '#3b82f6';
+    case 'method':
+      return '#f59e0b';
+    case 'arrow':
+      return '#10b981';
+    case 'module':
+      return '#9ca3af';
   }
 }

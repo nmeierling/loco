@@ -72,7 +72,13 @@ export class LocService {
         const cb = pending.get(r.id);
         if (cb) {
           pending.delete(r.id);
-          cb({ id: r.id, loc: r.loc, blank: r.blank, comment: r.comment, complexity: r.complexity });
+          cb({
+            id: r.id,
+            loc: r.loc,
+            blank: r.blank,
+            comment: r.comment,
+            complexity: r.complexity,
+          });
         }
       };
 

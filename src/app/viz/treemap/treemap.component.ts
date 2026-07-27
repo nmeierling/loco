@@ -31,6 +31,8 @@ type EmptyReason =
   | { kind: 'no-matches'; canClearFilters: boolean; userIgnoreCount: number }
   | { kind: 'churn-loading'; done: number; total: number }
   | { kind: 'churn-error'; message: string }
+  | { kind: 'risk-loading' }
+  | { kind: 'risk-error'; message: string }
   | { kind: 'no-data'; metric: MetricKind };
 
 interface TileDatum {
@@ -93,6 +95,20 @@ interface TileDatum {
             }
             @case ('churn-error') {
               <p class="empty-title">Churn is unavailable.</p>
+              <p class="empty-hint">{{ e.message }}</p>
+            }
+            @case ('risk-loading') {
+              <p class="empty-title">Scoring risk…</p>
+              <p class="empty-hint">
+                Risk needs the import graph to know how many files depend on each one, so it is
+                built the first time the metric is used.
+              </p>
+              <div class="progress" role="progressbar">
+                <div class="progress-fill indeterminate"></div>
+              </div>
+            }
+            @case ('risk-error') {
+              <p class="empty-title">Risk is unavailable.</p>
               <p class="empty-hint">{{ e.message }}</p>
             }
             @case ('no-data') {
@@ -357,6 +373,11 @@ export class TreemapComponent implements AfterViewInit {
     // churn data, or all files at LOC=0). The chip disabling already prevents
     // most of these, but it's still possible for narrow filtered subsets.
     const metric = this.store.filters().metric;
+    if (metric === 'risk') {
+      const r = this.store.risk();
+      if (r.status === 'computing' || r.status === 'idle') return { kind: 'risk-loading' };
+      if (r.status === 'error') return { kind: 'risk-error', message: r.message };
+    }
     if (metric === 'churn') {
       const c = this.store.churn();
       if (c.status === 'pending') return { kind: 'churn-loading', done: 0, total: 0 };

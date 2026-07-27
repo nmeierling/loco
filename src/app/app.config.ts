@@ -14,6 +14,7 @@ import { ModuleGraphComponent } from './viz/module-graph/module-graph.component'
 import { SunburstComponent } from './viz/sunburst/sunburst.component';
 import { DependencyMatrixComponent } from './viz/matrix/matrix.component';
 import { MetricListComponent } from './viz/list/metric-list.component';
+import { SymbolsVizComponent } from './viz/symbols/symbols.component';
 
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -50,6 +51,12 @@ export const appConfig: ApplicationConfig = {
         label: 'Module graph',
         description: 'File-level import dependencies (TS/JS/TSX/JSX, Python).',
         component: ModuleGraphComponent,
+      });
+      registry.register({
+        id: 'symbols',
+        label: 'Symbols',
+        description: 'Unused exports and the export surface of each folder.',
+        component: SymbolsVizComponent,
       });
       registry.register({
         id: 'matrix',

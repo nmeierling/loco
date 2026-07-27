@@ -23,7 +23,11 @@ import { AnalysisStore } from '../core/state/analysis.store';
         <div class="actions">
           <button class="action" (click)="ignoreFile(s.path)">Ignore file</button>
           @if (s.parent) {
-            <button class="action" (click)="ignoreFolder(s.parent)" title="Ignore '{{ s.parent }}/'">
+            <button
+              class="action"
+              (click)="ignoreFolder(s.parent)"
+              title="Ignore '{{ s.parent }}/'"
+            >
               Ignore folder
             </button>
           }
@@ -76,7 +80,9 @@ import { AnalysisStore } from '../core/state/analysis.store';
         @if (open()['gitignore']) {
           <ul class="patterns ro">
             @for (p of gitignore(); track p) {
-              <li class="pattern ro"><code>{{ p }}</code></li>
+              <li class="pattern ro">
+                <code>{{ p }}</code>
+              </li>
             }
           </ul>
         }
@@ -94,7 +100,9 @@ import { AnalysisStore } from '../core/state/analysis.store';
           <p class="desc">{{ sec.description }}</p>
           <ul class="patterns ro">
             @for (p of sec.patterns; track p) {
-              <li class="pattern ro"><code>{{ p }}</code></li>
+              <li class="pattern ro">
+                <code>{{ p }}</code>
+              </li>
             }
           </ul>
         }
@@ -281,8 +289,7 @@ export class IgnorePanelComponent {
   readonly gitignore = this.ig.gitignorePatterns;
 
   readonly totalCount = computed(
-    () =>
-      this.ig.defaults.length + this.gitignore().length + this.userPatterns().length,
+    () => this.ig.defaults.length + this.gitignore().length + this.userPatterns().length,
   );
 
   readonly selected = computed(() => {

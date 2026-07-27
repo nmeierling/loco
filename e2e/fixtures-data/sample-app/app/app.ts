@@ -23,5 +23,13 @@ export async function bootstrap(): Promise<void> {
   catalog.load(await client.listProducts());
   list.sortBy('name');
   cart.label();
-  if (config.checkoutEnabled) checkout.total();
+
+  // Two hops down to CatalogStore.selectProduct, so the impact trace has a chain
+  // deeper than one level to walk.
+  const first = catalog.sorted('name')[0];
+  if (first) list.pick(first);
+  if (config.checkoutEnabled) {
+    checkout.total();
+    checkout.confirm();
+  }
 }

@@ -23,9 +23,7 @@ describe('extractImports — TypeScript', () => {
         node('string', '"./foo"'),
       ]),
     ]);
-    expect(extractImports(ast, 'ts')).toEqual([
-      { specifier: './foo', relative: true },
-    ]);
+    expect(extractImports(ast, 'ts')).toEqual([{ specifier: './foo', relative: true }]);
   });
 
   it('extracts a dynamic import() argument', () => {
@@ -33,15 +31,11 @@ describe('extractImports — TypeScript', () => {
       node('expression_statement', '', [
         node('call_expression', 'import("./lazy")', [
           node('import', 'import'),
-          node('arguments', '("./lazy")', [
-            node('string', '"./lazy"'),
-          ]),
+          node('arguments', '("./lazy")', [node('string', '"./lazy"')]),
         ]),
       ]),
     ]);
-    expect(extractImports(ast, 'ts')).toEqual([
-      { specifier: './lazy', relative: true },
-    ]);
+    expect(extractImports(ast, 'ts')).toEqual([{ specifier: './lazy', relative: true }]);
   });
 
   it('extracts a CommonJS require() call', () => {
@@ -49,15 +43,11 @@ describe('extractImports — TypeScript', () => {
       node('expression_statement', '', [
         node('call_expression', "require('lodash')", [
           node('identifier', 'require'),
-          node('arguments', "('lodash')", [
-            node('string', "'lodash'"),
-          ]),
+          node('arguments', "('lodash')", [node('string', "'lodash'")]),
         ]),
       ]),
     ]);
-    expect(extractImports(ast, 'ts')).toEqual([
-      { specifier: 'lodash', relative: false },
-    ]);
+    expect(extractImports(ast, 'ts')).toEqual([{ specifier: 'lodash', relative: false }]);
   });
 
   it('flags relative vs external correctly', () => {
@@ -76,30 +66,20 @@ describe('extractImports — Python', () => {
     const ast = node('module', '', [
       node('import_statement', 'import os', [node('dotted_name', 'os')]),
     ]);
-    expect(extractImports(ast, 'py')).toEqual([
-      { specifier: 'os', relative: false },
-    ]);
+    expect(extractImports(ast, 'py')).toEqual([{ specifier: 'os', relative: false }]);
   });
 
   it('extracts a relative from-import with leading dots', () => {
     const ast = node('module', '', [
-      node('import_from_statement', 'from .pkg import bar', [
-        node('relative_import', '.pkg'),
-      ]),
+      node('import_from_statement', 'from .pkg import bar', [node('relative_import', '.pkg')]),
     ]);
-    expect(extractImports(ast, 'py')).toEqual([
-      { specifier: '.pkg', relative: false },
-    ]);
+    expect(extractImports(ast, 'py')).toEqual([{ specifier: '.pkg', relative: false }]);
   });
 
   it('extracts an absolute from-import', () => {
     const ast = node('module', '', [
-      node('import_from_statement', 'from pkg.sub import baz', [
-        node('dotted_name', 'pkg.sub'),
-      ]),
+      node('import_from_statement', 'from pkg.sub import baz', [node('dotted_name', 'pkg.sub')]),
     ]);
-    expect(extractImports(ast, 'py')).toEqual([
-      { specifier: 'pkg.sub', relative: false },
-    ]);
+    expect(extractImports(ast, 'py')).toEqual([{ specifier: 'pkg.sub', relative: false }]);
   });
 });

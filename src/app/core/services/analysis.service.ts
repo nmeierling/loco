@@ -57,6 +57,7 @@ export class AnalysisService {
           loc: r ? r.loc : null,
           complexity: r ? r.complexity : null,
           churn: null,
+          risk: null,
         },
       };
     });

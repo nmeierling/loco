@@ -4,7 +4,9 @@ import {
   Component,
   DestroyRef,
   ElementRef,
+  EventEmitter,
   Input,
+  Output,
   ViewChild,
   computed,
   effect,
@@ -17,6 +19,17 @@ import { HighlightToken } from '../core/services/complexity.service';
 interface Segment {
   kind: string;
   text: string;
+  /** Set when the segment is a resolved reference — clicking it jumps to the source. */
+  defId?: string;
+}
+
+/** A resolved identifier occurrence the panel should turn into a link. */
+export interface SourceLink {
+  row: number;
+  col: number;
+  endCol: number;
+  defId: string;
+  title: string;
 }
 
 @Component({
@@ -33,7 +46,19 @@ interface Segment {
             [class.highlighted]="isHighlighted($index + 1)"
             [class.start]="isStart($index + 1)"
             [class.end]="isEnd($index + 1)"
-          ><span class="num">{{ $index + 1 }}</span><span class="text">@for (seg of segs; track $index) {<span [class]="seg.kind ? 'tok tok-' + seg.kind : 'tok'">{{ seg.text }}</span>}</span></div>
+          >
+            <span class="num">{{ $index + 1 }}</span
+            ><span class="text">
+              @for (seg of segs; track $index) {
+                <span
+                  [class]="segClass(seg)"
+                  [attr.title]="seg.defId ? linkTitles().get(seg.defId) : null"
+                  (click)="onSegClick(seg, $event)"
+                  >{{ seg.text }}</span
+                >
+              }
+            </span>
+          </div>
         }
       </div>
     </div>
@@ -73,7 +98,9 @@ interface Segment {
         box-shadow: inset 0 -1px 0 var(--accent);
       }
       .row.highlighted.start.end {
-        box-shadow: inset 0 1px 0 var(--accent), inset 0 -1px 0 var(--accent);
+        box-shadow:
+          inset 0 1px 0 var(--accent),
+          inset 0 -1px 0 var(--accent);
       }
       .num {
         color: color-mix(in srgb, var(--fg) 35%, transparent);
@@ -82,6 +109,11 @@ interface Segment {
         user-select: none;
       }
       .text {
+        /* Flex, not inline: a flex container drops whitespace-only text nodes between
+           its items, so the newlines and indentation between the token spans in the
+           template cannot leak into the rendered source. With inline spans, any
+           reformatting of the template would silently add spaces to the code. */
+        display: flex;
         white-space: pre;
       }
       .tok {
@@ -103,6 +135,17 @@ interface Segment {
       .tok-ident {
         color: var(--tok-ident);
       }
+      .tok.link {
+        cursor: pointer;
+        text-decoration: underline;
+        text-decoration-style: dotted;
+        text-decoration-color: color-mix(in srgb, var(--accent) 55%, transparent);
+        text-underline-offset: 3px;
+      }
+      .tok.link:hover {
+        color: var(--accent);
+        text-decoration-style: solid;
+      }
     `,
   ],
 })
@@ -114,8 +157,17 @@ export class SourcePanelComponent implements AfterViewInit {
 
   private readonly lines = signal<string[]>([]);
   private readonly tokens = signal<readonly HighlightToken[]>([]);
+  private readonly links = signal<readonly SourceLink[]>([]);
   readonly range = this.selection.range;
-  readonly lineSegments = computed<Segment[][]>(() => buildSegments(this.lines(), this.tokens()));
+  readonly lineSegments = computed<Segment[][]>(() =>
+    buildSegments(this.lines(), this.tokens(), this.links()),
+  );
+  /** defId → hover text, so the template can label a link without a lookup helper. */
+  readonly linkTitles = computed(() => {
+    const map = new Map<string, string>();
+    for (const l of this.links()) map.set(l.defId, l.title);
+    return map;
+  });
 
   @Input({ required: true }) set text(value: string) {
     this.lines.set(value.length === 0 ? [] : value.split(/\r\n|\n|\r/));
@@ -124,6 +176,25 @@ export class SourcePanelComponent implements AfterViewInit {
 
   @Input() set tokensInput(value: readonly HighlightToken[] | null) {
     this.tokens.set(value ?? []);
+  }
+
+  /** Resolved references in this file; each becomes a click target. */
+  @Input() set linksInput(value: readonly SourceLink[] | null) {
+    this.links.set(value ?? []);
+  }
+
+  /** Emits the declaration id the user clicked through to. */
+  @Output() readonly gotoDefinition = new EventEmitter<string>();
+
+  segClass(seg: Segment): string {
+    const base = seg.kind ? `tok tok-${seg.kind}` : 'tok';
+    return seg.defId ? `${base} link` : base;
+  }
+
+  onSegClick(seg: Segment, ev: Event): void {
+    if (!seg.defId) return;
+    ev.stopPropagation();
+    this.gotoDefinition.emit(seg.defId);
   }
 
   constructor() {
@@ -161,12 +232,22 @@ export class SourcePanelComponent implements AfterViewInit {
   }
 }
 
-function buildSegments(lines: readonly string[], tokens: readonly HighlightToken[]): Segment[][] {
+function buildSegments(
+  lines: readonly string[],
+  tokens: readonly HighlightToken[],
+  links: readonly SourceLink[],
+): Segment[][] {
   const out: Segment[][] = [];
   if (lines.length === 0) return out;
-  if (tokens.length === 0) {
+  if (tokens.length === 0 && links.length === 0) {
     for (const line of lines) out.push([{ kind: '', text: line }]);
     return out;
+  }
+  const linksByLine = new Map<number, SourceLink[]>();
+  for (const l of links) {
+    const list = linksByLine.get(l.row) ?? [];
+    list.push(l);
+    linksByLine.set(l.row, list);
   }
   // Bucket tokens by line, slicing multi-line spans (e.g. block comments).
   const perLine: { start: number; end: number; kind: string }[][] = lines.map(() => []);
@@ -196,7 +277,45 @@ function buildSegments(lines: readonly string[], tokens: readonly HighlightToken
     }
     if (cursor < line.length) segs.push({ kind: '', text: line.slice(cursor) });
     if (segs.length === 0) segs.push({ kind: '', text: line });
-    out.push(segs);
+    out.push(applyLinks(segs, linksByLine.get(r) ?? []));
+  }
+  return out;
+}
+
+/**
+ * Splits highlight segments again at reference boundaries so a resolved identifier
+ * becomes its own clickable span. Highlighting and linking are computed separately —
+ * one comes from the grammar, the other from the symbol index — and their boundaries
+ * usually but not always coincide.
+ */
+function applyLinks(segs: Segment[], links: readonly SourceLink[]): Segment[] {
+  if (links.length === 0) return segs;
+  const sorted = [...links].sort((a, b) => a.col - b.col);
+  const out: Segment[] = [];
+  let col = 0;
+  for (const seg of segs) {
+    const segStart = col;
+    const segEnd = col + seg.text.length;
+    col = segEnd;
+    let cursor = segStart;
+    for (const link of sorted) {
+      if (link.endCol <= cursor || link.col >= segEnd) continue;
+      const from = Math.max(cursor, link.col);
+      const to = Math.min(segEnd, link.endCol);
+      if (to <= from) continue;
+      if (from > cursor) {
+        out.push({ kind: seg.kind, text: seg.text.slice(cursor - segStart, from - segStart) });
+      }
+      out.push({
+        kind: seg.kind,
+        text: seg.text.slice(from - segStart, to - segStart),
+        defId: link.defId,
+      });
+      cursor = to;
+    }
+    if (cursor < segEnd) {
+      out.push({ kind: seg.kind, text: seg.text.slice(cursor - segStart) });
+    }
   }
   return out;
 }

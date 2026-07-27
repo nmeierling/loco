@@ -36,6 +36,7 @@ interface Row {
   loc: number | null;
   complexity: number | null;
   churn: number | null;
+  risk: number | null;
 }
 
 interface CellView {
@@ -64,7 +65,13 @@ type EmptyReason =
 
 const ROW_H = 26;
 const OVERSCAN = 8;
-const METRICS: MetricKind[] = ['loc', 'complexity', 'churn'];
+const METRIC_LABELS: Record<MetricKind, string> = {
+  loc: 'LOC',
+  complexity: 'Complexity',
+  churn: 'Churn',
+  risk: 'Risk',
+};
+const METRICS: MetricKind[] = ['loc', 'complexity', 'churn', 'risk'];
 
 @Component({
   selector: 'loco-metric-list',
@@ -460,6 +467,7 @@ export class MetricListComponent {
     loc: null,
     complexity: null,
     churn: null,
+    risk: null,
   });
 
   private readonly scrollTop = signal(0);
@@ -470,7 +478,12 @@ export class MetricListComponent {
    * placeholder-filled until the background history walk lands.
    */
   readonly activeMetrics = computed<MetricKind[]>(() =>
-    METRICS.filter((m) => m !== 'churn' || this.store.churnOffered()),
+    METRICS.filter((m) => {
+      if (m === 'churn') return this.store.churnOffered();
+      // Risk is computed on demand, so its column appears once the score exists.
+      if (m === 'risk') return this.store.risk().status === 'ready';
+      return true;
+    }),
   );
 
   readonly churnNote = computed<string | null>(() => {
@@ -491,7 +504,7 @@ export class MetricListComponent {
     for (const m of this.activeMetrics()) {
       cols.push({
         key: m,
-        label: m === 'loc' ? 'LOC' : m === 'complexity' ? 'Complexity' : 'Churn',
+        label: METRIC_LABELS[m],
         numeric: true,
         width: '118px',
         align: 'right',
@@ -553,7 +566,7 @@ export class MetricListComponent {
 
   /** Column maxima, for the in-cell magnitude bars. Recomputed from the visible rows. */
   private readonly maxima = computed<Record<MetricKind, number>>(() => {
-    const max: Record<MetricKind, number> = { loc: 0, complexity: 0, churn: 0 };
+    const max: Record<MetricKind, number> = { loc: 0, complexity: 0, churn: 0, risk: 0 };
     for (const r of this.rows()) {
       for (const m of METRICS) {
         const v = r[m];
@@ -676,7 +689,7 @@ export class MetricListComponent {
   clearLocalFilters(): void {
     this.query.set('');
     this.language.set('');
-    this.mins.set({ loc: null, complexity: null, churn: null });
+    this.mins.set({ loc: null, complexity: null, churn: null, risk: null });
     this.resetScroll();
   }
 
@@ -710,6 +723,7 @@ function toRow(f: FileNode): Row {
     loc: f.metrics.loc,
     complexity: f.metrics.complexity,
     churn: f.metrics.churn,
+    risk: f.metrics.risk,
   };
 }
 

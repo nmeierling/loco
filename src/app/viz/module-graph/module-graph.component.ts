@@ -49,6 +49,8 @@ interface RenderNode {
   loc: number;
   inDeg: number;
   outDeg: number;
+  /** Part of an import cycle — drawn with a danger ring. */
+  inCycle: boolean;
 }
 
 interface RenderLink {
@@ -70,7 +72,9 @@ interface RenderLink {
           @if (progress(); as p) {
             <div class="msg">
               Building module graph…
-              <div class="bar"><div class="fill" [style.width.%]="(p.done / p.total) * 100"></div></div>
+              <div class="bar">
+                <div class="fill" [style.width.%]="(p.done / p.total) * 100"></div>
+              </div>
               <div class="counts">{{ p.done }} / {{ p.total }}</div>
             </div>
           } @else {
@@ -118,8 +122,14 @@ interface RenderLink {
                   <circle
                     [attr.r]="n.r"
                     [attr.fill]="n.color"
-                    [attr.stroke]="n.id === selectedPath() ? 'var(--accent)' : 'rgba(0,0,0,0.4)'"
-                    [attr.stroke-width]="n.id === selectedPath() ? 2 : 0.5"
+                    [attr.stroke]="
+                      n.id === selectedPath()
+                        ? 'var(--accent)'
+                        : n.inCycle
+                          ? 'var(--danger)'
+                          : 'rgba(0,0,0,0.4)'
+                    "
+                    [attr.stroke-width]="n.id === selectedPath() ? 2 : n.inCycle ? 1.6 : 0.5"
                   />
                   @if (n.r >= 6) {
                     <text
@@ -188,13 +198,38 @@ interface RenderLink {
       @if (hovered(); as h) {
         <div class="tip" [style.left.px]="tipPos().x" [style.top.px]="tipPos().y">
           <div class="tip-path">{{ h.path }}</div>
-          <div class="tip-row">in <strong>{{ h.inDeg }}</strong> &nbsp; out <strong>{{ h.outDeg }}</strong></div>
-          <div class="tip-row">LOC <strong>{{ h.loc }}</strong></div>
+          <div class="tip-row">
+            in <strong>{{ h.inDeg }}</strong> &nbsp; out <strong>{{ h.outDeg }}</strong>
+          </div>
+          <div class="tip-row">
+            LOC <strong>{{ h.loc }}</strong>
+          </div>
+        </div>
+      }
+
+      @if (status() === 'ready') {
+        <div class="cycles">
+          @if (cycles().length === 0) {
+            <span class="ok">no import cycles</span>
+          } @else {
+            <button
+              type="button"
+              class="cycle-btn"
+              [class.active]="onlyCycles()"
+              (click)="onlyCycles.set(!onlyCycles())"
+              [title]="cycleTitle()"
+            >
+              {{ cycles().length }} import {{ cycles().length === 1 ? 'cycle' : 'cycles' }} ({{
+                cycleNodeCount()
+              }}
+              files)
+            </button>
+          }
         </div>
       }
 
       <div class="legend">
-        <span>· click: select  · dbl-click: open AST  · scroll: zoom  · drag: pan</span>
+        <span>· click: select · dbl-click: open AST · scroll: zoom · drag: pan</span>
       </div>
     </div>
   `,
@@ -280,6 +315,33 @@ interface RenderLink {
         gap: 12px;
         opacity: 0.8;
       }
+      .cycles {
+        position: absolute;
+        top: 8px;
+        left: 8px;
+        z-index: 5;
+        font-size: 11px;
+      }
+      .cycles .ok {
+        opacity: 0.45;
+      }
+      .cycle-btn {
+        background: color-mix(in srgb, var(--bar-bg) 92%, transparent);
+        border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+        color: var(--danger);
+        border-radius: 4px;
+        font: inherit;
+        font-size: 11px;
+        padding: 3px 8px;
+        cursor: pointer;
+      }
+      .cycle-btn:hover {
+        border-color: var(--danger);
+      }
+      .cycle-btn.active {
+        background: var(--danger);
+        color: var(--bg);
+      }
       .legend {
         position: absolute;
         bottom: 6px;
@@ -320,6 +382,23 @@ export class ModuleGraphComponent implements AfterViewInit {
   readonly nodes = signal<RenderNode[]>([]);
   readonly links = signal<RenderLink[]>([]);
   readonly status = signal<'idle' | 'building' | 'empty' | 'ready'>('idle');
+  /** Narrow the graph to the files caught in an import cycle. */
+  readonly onlyCycles = signal(false);
+  readonly cycles = signal<readonly string[][]>([]);
+  readonly cycleNodes = computed(() => new Set(this.cycles().flat()));
+  readonly cycleNodeCount = computed(() => this.cycleNodes().size);
+  readonly cycleTitle = computed(() => {
+    const list = this.cycles()
+      .slice(0, 5)
+      .map((c) => c.map(shortName).join(' → '));
+    const more = this.cycles().length - list.length;
+    return (
+      'Files that import each other, directly or through a chain:\n' +
+      list.join('\n') +
+      (more > 0 ? `\n…and ${more} more` : '') +
+      '\n\nClick to show only these.'
+    );
+  });
   readonly progress = this.service.building;
   readonly hover = signal<string | null>(null);
   readonly selectedPath = this.store.selectedPath;
@@ -341,9 +420,12 @@ export class ModuleGraphComponent implements AfterViewInit {
    * at the border instead of pushing it outwards (which used to make the minimap
    * rescale and visually shrink).
    */
-  private readonly nodeBounds = computed<
-    { minX: number; minY: number; maxX: number; maxY: number } | null
-  >(() => {
+  private readonly nodeBounds = computed<{
+    minX: number;
+    minY: number;
+    maxX: number;
+    maxY: number;
+  } | null>(() => {
     const ns = this.nodes();
     if (ns.length === 0) return null;
     let minX = Infinity;
@@ -424,6 +506,8 @@ export class ModuleGraphComponent implements AfterViewInit {
       // the layout mid-simulation.
       this.store.projectId();
       this.service.reset();
+      this.cycles.set([]);
+      this.onlyCycles.set(false);
       this.fullGraph = null;
       this.nodes.set([]);
       this.links.set([]);
@@ -441,10 +525,15 @@ export class ModuleGraphComponent implements AfterViewInit {
     });
 
     effect(() => {
-      // Re-render whenever the project-wide path/name/user-ignore filter changes.
+      // Re-render whenever the project-wide filter or the cycles-only toggle changes.
+      // Every signal is read before the guard: `this.fullGraph` is a plain field, so
+      // short-circuiting on it would leave the rest untracked on the first run and the
+      // effect would never fire again.
       const filtered = this.store.filteredPaths();
-      if (this.fullGraph && this.status() === 'ready') {
-        this.applyFilter(filtered);
+      const ready = this.status() === 'ready';
+      const onlyCycles = this.onlyCycles();
+      if (this.fullGraph && ready) {
+        this.applyFilter(filtered, onlyCycles);
       }
     });
   }
@@ -483,13 +572,17 @@ export class ModuleGraphComponent implements AfterViewInit {
       return;
     }
     this.fullGraph = { nodes: graph.nodes, edges: graph.edges };
-    this.applyFilter(this.store.filteredPaths());
+    this.cycles.set(graph.cycles);
+    this.applyFilter(this.store.filteredPaths(), this.onlyCycles());
     this.status.set('ready');
   }
 
-  private applyFilter(filtered: ReadonlySet<string>): void {
+  private applyFilter(filtered: ReadonlySet<string>, onlyCycles = false): void {
     if (!this.fullGraph) return;
-    const nodes = this.fullGraph.nodes.filter((n) => filtered.has(n.path));
+    const inCycle = this.cycleNodes();
+    const nodes = this.fullGraph.nodes.filter(
+      (n) => filtered.has(n.path) && (!onlyCycles || inCycle.has(n.path)),
+    );
     const keep = new Set(nodes.map((n) => n.path));
     const edges = this.fullGraph.edges.filter((e) => keep.has(e.from) && keep.has(e.to));
     if (nodes.length === 0) {
@@ -546,6 +639,7 @@ export class ModuleGraphComponent implements AfterViewInit {
         loc: sn.data.loc,
         inDeg: sn.data.inDegree,
         outDeg: sn.data.outDegree,
+        inCycle: this.cycleNodes().has(sn.data.path),
       }));
       const sel = this.selectedPath();
       const linksOut: RenderLink[] = this.simLinks.map((l) => {
@@ -641,7 +735,11 @@ export class ModuleGraphComponent implements AfterViewInit {
   }
 
   onPanStart(ev: MouseEvent): void {
-    if ((ev.target as Element).tagName.toLowerCase() === 'circle' || (ev.target as Element).tagName.toLowerCase() === 'text') return;
+    if (
+      (ev.target as Element).tagName.toLowerCase() === 'circle' ||
+      (ev.target as Element).tagName.toLowerCase() === 'text'
+    )
+      return;
     const startX = ev.clientX;
     const startY = ev.clientY;
     const startTx = this.tx();
@@ -657,4 +755,10 @@ export class ModuleGraphComponent implements AfterViewInit {
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
   }
+}
+
+/** Last path segment — cycle tooltips would be unreadable with full paths. */
+function shortName(path: string): string {
+  const idx = path.lastIndexOf('/');
+  return idx >= 0 ? path.slice(idx + 1) : path;
 }

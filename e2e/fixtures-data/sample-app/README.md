@@ -18,3 +18,7 @@ Shape the specs rely on:
 - `app/app.scss` is the one file with no AST grammar.
 - Three `*.component.ts` files back the name-filter and custom-ignore tests.
 - `app/core/workers/indexer.worker.ts` is the only path containing "worker".
+- `app/api/client.ts` and `app/api/routes.ts` import each other on purpose — that is
+  the one import cycle the module graph's detector is tested against.
+- `bootstrap()` in `app/app.ts` reaches `CatalogStore.selectProduct` through two hops,
+  giving the impact trace a chain deeper than one level.

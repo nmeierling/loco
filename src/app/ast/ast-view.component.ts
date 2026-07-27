@@ -14,7 +14,8 @@ import { AnalysisStore } from '../core/state/analysis.store';
 import { AstNode, ComplexityService, HighlightToken } from '../core/services/complexity.service';
 import { detectLanguage } from '../core/languages';
 import { AstSelectionService } from './ast-selection.service';
-import { SourcePanelComponent } from './source-panel.component';
+import { SourceLink, SourcePanelComponent } from './source-panel.component';
+import { SymbolIndexService } from '../core/services/symbol-index.service';
 import { CallGraphComponent } from './call-graph.component';
 import { UsagesPanelComponent } from './usages-panel.component';
 import { isCallGraphSupported } from '../core/services/call-graph';
@@ -258,7 +259,12 @@ export class AstNodeComponent {
             aria-orientation="vertical"
             (mousedown)="onDividerDown($event)"
           ></div>
-          <loco-source-panel [text]="stateReadyText()" [tokensInput]="stateReadyTokens()" />
+          <loco-source-panel
+            [text]="stateReadyText()"
+            [tokensInput]="stateReadyTokens()"
+            [linksInput]="sourceLinks()"
+            (gotoDefinition)="gotoDefinition($event)"
+          />
         </div>
       }
     }
@@ -392,6 +398,7 @@ export class AstViewComponent {
   readonly store = inject(AnalysisStore);
   private readonly complexity = inject(ComplexityService);
   private readonly selection = inject(AstSelectionService);
+  private readonly symbols = inject(SymbolIndexService);
 
   @ViewChild('splitWrap', { static: false }) splitWrap?: ElementRef<HTMLDivElement>;
 
@@ -442,6 +449,13 @@ export class AstViewComponent {
         return;
       }
       void this.load(path, file);
+    });
+
+    // Source links need the index whichever mode is showing, so opening any indexable
+    // file warms it rather than waiting for the Usages tab.
+    effect(() => {
+      this.store.projectId();
+      if (isSymbolIndexSupported(this.stateReadyLangId())) void this.symbols.build();
     });
   }
 
@@ -512,6 +526,43 @@ export class AstViewComponent {
         return 'Click a usage to open that file at the line.';
     }
   });
+
+  /**
+   * Resolved references in the open file, handed to the source pane so every one of
+   * them becomes a go-to-definition link. Same data the usages panel lists.
+   */
+  readonly sourceLinks = computed<SourceLink[]>(() => {
+    const s = this.state();
+    if (s.kind !== 'ready') return [];
+    const idx = this.symbols.index();
+    if (!idx) return [];
+    const out: SourceLink[] = [];
+    for (const ref of idx.refsByPath.get(s.path) ?? []) {
+      const def = idx.defsById.get(ref.defId);
+      // Single-line references only — an identifier never wraps, and the segment
+      // splitter works within one line.
+      if (!def || ref.row !== ref.endRow) continue;
+      out.push({
+        row: ref.row,
+        col: ref.col,
+        endCol: ref.endCol,
+        defId: def.id,
+        title: `${def.owner ? def.owner + '.' : ''}${def.name} — ${def.path}:${def.startRow + 1}`,
+      });
+    }
+    return out;
+  });
+
+  gotoDefinition(defId: string): void {
+    const def = this.symbols.index()?.defsById.get(defId);
+    if (!def) return;
+    this.selection.jumpTo(def.path, {
+      startRow: def.startRow,
+      startCol: def.startCol,
+      endRow: def.endRow,
+      endCol: def.endCol,
+    });
+  }
 
   callsSupported(): boolean {
     return isCallGraphSupported(this.stateReadyLangId());

@@ -132,6 +132,26 @@ test.describe('Alternative vizzes (sunburst, module graph, dep matrix)', () => {
     expect(scaleAfter).toBeGreaterThan(scaleBefore * 0.5);
   });
 
+  test('module graph flags import cycles and can show only those files', async ({ page }) => {
+    await loadFixture(page);
+    await selectViz(page, 'Module graph');
+    await page.waitForSelector('loco-module-graph svg circle');
+
+    // The fixture contains exactly one deliberate cycle: client.ts ↔ routes.ts.
+    const chip = page.locator('loco-module-graph .cycle-btn');
+    await expect(chip).toContainText('1 import cycle');
+    await expect(chip).toContainText('2 files');
+    await expect(chip).toHaveAttribute('title', /client\.ts|routes\.ts/);
+
+    const all = await page.locator('loco-module-graph svg .nodes circle').count();
+    await chip.click();
+    await expect.poll(() => page.locator('loco-module-graph svg .nodes circle').count()).toBe(2);
+    expect(all).toBeGreaterThan(2);
+
+    await chip.click();
+    await expect.poll(() => page.locator('loco-module-graph svg .nodes circle').count()).toBe(all);
+  });
+
   test('module graph shows a minimap; clicking it pans the main view', async ({ page }) => {
     await loadFixture(page);
     await selectViz(page, 'Module graph');

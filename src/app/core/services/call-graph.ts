@@ -83,7 +83,8 @@ export function extractCallGraph(ast: AstNode, languageId: string): CallGraph {
 
   function walkDeclarations(node: AstNode): void {
     if (node.type === 'function_declaration' || node.type === 'generator_function_declaration') {
-      const nameNode = findFirstChild(node, 'identifier') ?? findFirstChild(node, 'property_identifier');
+      const nameNode =
+        findFirstChild(node, 'identifier') ?? findFirstChild(node, 'property_identifier');
       const name = nameFromIdentifier(nameNode) ?? '(anonymous)';
       const body = findFirstChild(node, 'statement_block');
       register(
