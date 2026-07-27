@@ -21,16 +21,40 @@ test.describe('Symbols viz', () => {
     await expect(page.locator('loco-symbols-viz .caveat')).toContainText(/entry points/i);
   });
 
-  test('filtering narrows the unused list', async ({ page }) => {
+  test('the global path filter scopes the list', async ({ page }) => {
     await loadFixture(page);
     await selectViz(page, 'Symbols');
     await expect(page.locator('loco-symbols-viz .row').first()).toBeVisible();
     const before = await page.locator('loco-symbols-viz .row').count();
 
-    await page.locator('loco-symbols-viz .search').fill('indexer');
+    // No filter box of its own — the toolbar's path filter drives it, as everywhere else.
+    await expect(page.locator('loco-symbols-viz input[type="search"]')).toHaveCount(0);
+    await page.locator('loco-filter-bar input.search.path').fill('app/core/workers');
+
     await expect.poll(() => page.locator('loco-symbols-viz .row').count()).toBeLessThan(before);
     const paths = await page.locator('loco-symbols-viz .group-head .path').allTextContents();
-    for (const p of paths) expect(p).toContain('indexer');
+    expect(paths.length).toBeGreaterThan(0);
+    for (const p of paths) expect(p).toContain('app/core/workers');
+  });
+
+  test('copies the visible list to the clipboard', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await loadFixture(page);
+    await selectViz(page, 'Symbols');
+    await expect(page.locator('loco-symbols-viz .row').first()).toBeVisible();
+
+    await page.locator('loco-symbols-viz .copy').click();
+    await expect(page.locator('loco-symbols-viz .copy')).toHaveText('copied');
+
+    const text = await page.evaluate(() => navigator.clipboard.readText());
+    expect(text).toContain('EMPTY_PRODUCT');
+    expect(text).toContain('app/core/models/product.ts');
+
+    // The other tab copies its own shape.
+    await page.locator('loco-symbols-viz .tabs button', { hasText: 'Folder surface' }).click();
+    await page.locator('loco-symbols-viz .copy').click();
+    const surface = await page.evaluate(() => navigator.clipboard.readText());
+    expect(surface).toMatch(/\d+\/\d+ public/);
   });
 
   test('clicking an unused export opens it in the AST view', async ({ page }) => {

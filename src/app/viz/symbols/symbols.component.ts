@@ -6,7 +6,6 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { AnalysisStore } from '../../core/state/analysis.store';
 import {
@@ -27,7 +26,6 @@ type Bucket = 'external' | 'internal' | 'unused';
 @Component({
   selector: 'loco-symbols-viz',
   standalone: true,
-  imports: [FormsModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="wrap">
@@ -40,18 +38,20 @@ type Bucket = 'external' | 'internal' | 'unused';
             Folder surface
           </button>
         </div>
-        <input
-          class="search"
-          type="search"
-          placeholder="filter by name or path…"
-          [ngModel]="query()"
-          (ngModelChange)="query.set($event)"
-        />
         <div class="spacer"></div>
         @if (ready()) {
           <div class="count">
             {{ tab() === 'unused' ? unusedCount() + ' unused' : folders().length + ' folders' }}
           </div>
+          <button
+            type="button"
+            class="copy"
+            [disabled]="copyDisabled()"
+            (click)="copy()"
+            title="Copy the list below to the clipboard as text"
+          >
+            {{ copied() ? 'copied' : 'copy' }}
+          </button>
         }
       </div>
 
@@ -195,19 +195,23 @@ type Bucket = 'external' | 'internal' | 'unused';
       .tabs button:hover:not(.active) {
         background: var(--hover);
       }
-      .search {
-        background: var(--input-bg);
-        color: inherit;
+      .copy {
+        background: transparent;
         border: 1px solid var(--border);
-        border-radius: 4px;
-        padding: 3px 8px;
-        font-size: 12px;
-        font-family: inherit;
-        min-width: 200px;
+        color: inherit;
+        border-radius: 3px;
+        font: inherit;
+        font-size: 11px;
+        padding: 2px 8px;
+        cursor: pointer;
       }
-      .search:focus {
-        outline: none;
+      .copy:hover:not(:disabled) {
         border-color: var(--accent);
+        color: var(--accent);
+      }
+      .copy:disabled {
+        opacity: 0.4;
+        cursor: default;
       }
       .spacer {
         flex: 1;
@@ -391,7 +395,8 @@ export class SymbolsVizComponent {
   private readonly router = inject(Router);
 
   readonly tab = signal<Tab>('unused');
-  readonly query = signal('');
+  readonly copied = signal(false);
+  private copiedTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly expanded = signal<ReadonlySet<string>>(new Set());
 
   readonly buckets: Bucket[] = ['external', 'internal', 'unused'];
@@ -408,10 +413,12 @@ export class SymbolsVizComponent {
   /** Unused exports, filtered and grouped by the file that declares them. */
   readonly unused = computed<UnusedGroup[]>(() => {
     this.index.index();
-    const q = this.query().trim().toLowerCase();
+    // The toolbar's name/path filter and the ignore list already scope every other
+    // viz; this one honours the same selection rather than adding a second box.
+    const visible = this.store.filteredPaths();
     const groups = new Map<string, SymbolDef[]>();
     for (const def of this.index.unusedExports()) {
-      if (q && !def.name.toLowerCase().includes(q) && !def.path.toLowerCase().includes(q)) continue;
+      if (!visible.has(def.path)) continue;
       const list = groups.get(def.path) ?? [];
       list.push(def);
       groups.set(def.path, list);
@@ -425,14 +432,23 @@ export class SymbolsVizComponent {
 
   readonly folders = computed<FolderSurface[]>(() => {
     this.index.index();
-    const q = this.query().trim().toLowerCase();
-    const all = this.index.folderSurface();
-    if (!q) return all;
-    return all.filter(
-      (f) =>
-        f.folder.toLowerCase().includes(q) ||
-        f.exported.some((d) => d.name.toLowerCase().includes(q)),
-    );
+    const visible = this.store.filteredPaths();
+    const out: FolderSurface[] = [];
+    for (const f of this.index.folderSurface()) {
+      // Drop symbols whose file the global filter hides, and the folder with them if
+      // nothing survives.
+      const keep = (defs: SymbolDef[]) => defs.filter((d) => visible.has(d.path));
+      const exported = keep(f.exported);
+      if (exported.length === 0) continue;
+      out.push({
+        folder: f.folder,
+        exported,
+        external: keep(f.external),
+        internal: keep(f.internal),
+        unused: keep(f.unused),
+      });
+    }
+    return out;
   });
 
   defsIn(surface: FolderSurface, bucket: Bucket): SymbolDef[] {
@@ -467,6 +483,44 @@ export class SymbolsVizComponent {
       if (!next.delete(folder)) next.add(folder);
       return next;
     });
+  }
+
+  readonly copyDisabled = computed(() =>
+    this.tab() === 'unused' ? this.unused().length === 0 : this.folders().length === 0,
+  );
+
+  /** Plain text of whichever tab is showing, so a list can leave the app. */
+  private asText(): string {
+    if (this.tab() === 'unused') {
+      return this.unused()
+        .map((g) =>
+          [g.path, ...g.defs.map((d) => `  ${d.kind} ${d.name}:${d.startRow + 1}`)].join('\n'),
+        )
+        .join('\n');
+    }
+    return this.folders()
+      .map((f) => {
+        const head = `${f.folder || '(root)'}  ${f.external.length}/${f.exported.length} public`;
+        const lines = this.buckets.flatMap((b) =>
+          this.defsIn(f, b).map(
+            (d) => `  [${this.bucketLabel(b)}] ${d.kind} ${d.name} (${d.path}:${d.startRow + 1})`,
+          ),
+        );
+        return [head, ...lines].join('\n');
+      })
+      .join('\n\n');
+  }
+
+  async copy(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(this.asText());
+    } catch {
+      // Clipboard access can be denied; the button simply does not confirm.
+      return;
+    }
+    this.copied.set(true);
+    if (this.copiedTimer) clearTimeout(this.copiedTimer);
+    this.copiedTimer = setTimeout(() => this.copied.set(false), 1500);
   }
 
   open(def: SymbolDef): void {

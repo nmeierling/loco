@@ -81,14 +81,6 @@ const METRICS: MetricKind[] = ['loc', 'complexity', 'churn', 'risk'];
   template: `
     <div class="wrap">
       <div class="controls">
-        <input
-          class="search"
-          type="search"
-          placeholder="filter rows… (name or path)"
-          [ngModel]="query()"
-          (ngModelChange)="setQuery($event)"
-        />
-
         <label class="pick">
           <span class="cap">lang</span>
           <select [ngModel]="language()" (ngModelChange)="setLanguage($event)">
@@ -149,7 +141,8 @@ const METRICS: MetricKind[] = ['loc', 'complexity', 'churn', 'risk'];
             @case ('no-rows') {
               <p class="empty-title">No rows match the list filters.</p>
               <p class="empty-hint">
-                The language or minimum-value filters above exclude every visible file.
+                The language or minimum-value filters above exclude every visible file. Name and
+                path filtering lives in the toolbar.
               </p>
               <button type="button" class="clear-filters" (click)="clearLocalFilters()">
                 Reset list filters
@@ -231,17 +224,6 @@ const METRICS: MetricKind[] = ['loc', 'complexity', 'churn', 'risk'];
         background: var(--bar-bg);
         flex: none;
       }
-      .search {
-        background: var(--input-bg);
-        color: inherit;
-        border: 1px solid var(--border);
-        border-radius: 4px;
-        padding: 3px 8px;
-        font-size: 12px;
-        font-family: inherit;
-        min-width: 200px;
-      }
-      .search:focus,
       .pick select:focus,
       .pick input:focus {
         outline: none;
@@ -461,7 +443,6 @@ export class MetricListComponent {
   readonly sortKey = signal<SortKey>('loc');
   readonly sortDir = signal<SortDir>(-1);
 
-  readonly query = signal('');
   readonly language = signal('');
   readonly mins = signal<Record<MetricKind, number | null>>({
     loc: null,
@@ -545,11 +526,9 @@ export class MetricListComponent {
 
   /** Rows after the list-local filters, ordered by the active sort. */
   readonly rows = computed<Row[]>(() => {
-    const q = this.query().trim().toLowerCase();
     const lang = this.language();
     const mins = this.mins();
     const kept = this.allRows().filter((r) => {
-      if (q && !r.name.toLowerCase().includes(q) && !r.path.toLowerCase().includes(q)) return false;
       if (lang && r.language !== lang) return false;
       for (const m of METRICS) {
         const min = mins[m];
@@ -602,7 +581,7 @@ export class MetricListComponent {
 
   readonly hasLocalFilters = computed(() => {
     const mins = this.mins();
-    return !!this.query() || !!this.language() || METRICS.some((m) => mins[m] !== null);
+    return !!this.language() || METRICS.some((m) => mins[m] !== null);
   });
 
   readonly emptyReason = computed<EmptyReason | null>(() => {
@@ -670,11 +649,6 @@ export class MetricListComponent {
     return this.sortDir() === 1 ? 'ascending' : 'descending';
   }
 
-  setQuery(q: string): void {
-    this.query.set(q ?? '');
-    this.resetScroll();
-  }
-
   setLanguage(lang: string): void {
     this.language.set(lang ?? '');
     this.resetScroll();
@@ -687,7 +661,6 @@ export class MetricListComponent {
   }
 
   clearLocalFilters(): void {
-    this.query.set('');
     this.language.set('');
     this.mins.set({ loc: null, complexity: null, churn: null, risk: null });
     this.resetScroll();

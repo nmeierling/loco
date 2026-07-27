@@ -58,7 +58,9 @@ interface RenderLink {
   y1: number;
   x2: number;
   y2: number;
-  highlighted: boolean;
+  /** Endpoints kept as ids so highlighting can follow the selection without a re-tick. */
+  sourceId: string;
+  targetId: string;
 }
 
 @Component({
@@ -102,8 +104,8 @@ interface RenderLink {
                   [attr.y1]="l.y1"
                   [attr.x2]="l.x2"
                   [attr.y2]="l.y2"
-                  [attr.stroke]="l.highlighted ? 'var(--accent)' : 'rgba(128,128,128,0.35)'"
-                  [attr.stroke-width]="l.highlighted ? 1.5 : 0.6"
+                  [attr.stroke]="isLinkHot(l) ? 'var(--accent)' : 'rgba(128,128,128,0.35)'"
+                  [attr.stroke-width]="isLinkHot(l) ? 1.5 : 0.6"
                   marker-end="url(#arrow)"
                 />
               }
@@ -546,10 +548,13 @@ export class ModuleGraphComponent implements AfterViewInit {
         this.width.set(Math.max(0, Math.floor(r.width)));
         this.height.set(Math.max(0, Math.floor(r.height)));
       }
-      // Re-center simulation when size changes
+      // Keep the centre force current for any future run, but do NOT restart the
+      // simulation: selecting a file makes the ignore panel grow a scrollbar, which
+      // resizes this pane by a few pixels, and re-running the layout for that threw
+      // every node to a new position. The graph pans and zooms, so a settled layout
+      // simply stays put.
       if (this.simulation && this.width() > 0 && this.height() > 0) {
         this.simulation.force('center', forceCenter(this.width() / 2, this.height() / 2));
-        this.simulation.alpha(0.3).restart();
       }
     });
     ro.observe(el);
@@ -641,12 +646,17 @@ export class ModuleGraphComponent implements AfterViewInit {
         outDeg: sn.data.outDegree,
         inCycle: this.cycleNodes().has(sn.data.path),
       }));
-      const sel = this.selectedPath();
       const linksOut: RenderLink[] = this.simLinks.map((l) => {
         const s = l.source as SimNode;
         const t = l.target as SimNode;
-        const highlighted = sel != null && (s.id === sel || t.id === sel);
-        return { x1: s.x ?? 0, y1: s.y ?? 0, x2: t.x ?? 0, y2: t.y ?? 0, highlighted };
+        return {
+          x1: s.x ?? 0,
+          y1: s.y ?? 0,
+          x2: t.x ?? 0,
+          y2: t.y ?? 0,
+          sourceId: s.id,
+          targetId: t.id,
+        };
       });
       this.nodes.set(nodesOut);
       this.links.set(linksOut);
@@ -660,6 +670,13 @@ export class ModuleGraphComponent implements AfterViewInit {
     const rect = this.wrap.nativeElement.getBoundingClientRect();
     this.tipPos.set({ x: e.clientX - rect.left, y: e.clientY - rect.top });
   };
+
+  /** A link touching the selected file. Read from the signal so selecting a different
+   * file repaints the highlight without disturbing the layout. */
+  isLinkHot(l: RenderLink): boolean {
+    const sel = this.selectedPath();
+    return sel !== null && (l.sourceId === sel || l.targetId === sel);
+  }
 
   onClick(n: RenderNode): void {
     this.store.selectPath(n.id);

@@ -59,10 +59,16 @@ export async function expandFolder(page: Page, name: string): Promise<void> {
   }
 }
 
-/** Opens a fixture file in the AST view through the list viz. */
+/**
+ * Opens a fixture file in the AST view through the list viz, narrowing with the
+ * toolbar's name filter — the list has no filter box of its own.
+ */
 export async function openInAst(page: Page, nameFragment: string): Promise<void> {
   await selectViz(page, 'List');
-  await page.locator('loco-metric-list .search').fill(nameFragment);
+  const nameFilter = page.locator('loco-filter-bar input[placeholder*="name"]');
+  await nameFilter.fill(nameFragment);
   await page.locator('loco-metric-list .row').first().dblclick();
   await page.waitForURL(/\/ast$/);
+  // Leave the corpus intact for whatever the test does next.
+  await nameFilter.fill('');
 }

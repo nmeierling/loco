@@ -19,6 +19,7 @@ import { DropZoneComponent } from './drop-zone.component';
 import { SpinnerComponent } from './spinner.component';
 import { DirectoryTreeComponent } from './directory-tree.component';
 import { IgnorePanelComponent } from './ignore-panel.component';
+import { MetricsHelpComponent } from './metrics-help.component';
 
 type Side = 'left' | 'right';
 
@@ -42,6 +43,7 @@ const STORAGE_KEY = 'loco.panels.v1';
     SpinnerComponent,
     DirectoryTreeComponent,
     IgnorePanelComponent,
+    MetricsHelpComponent,
     RouterLink,
     RouterLinkActive,
     RouterOutlet,
@@ -61,6 +63,15 @@ const STORAGE_KEY = 'loco.panels.v1';
       </nav>
       @if (store.root(); as r) {
         <div class="root">
+          <button
+            type="button"
+            class="help"
+            (click)="helpOpen.set(true)"
+            title="How churn and risk are measured"
+            aria-label="How churn and risk are measured"
+          >
+            ?
+          </button>
           @if (cacheNote(); as note) {
             <span class="cache" [class.warn]="note.warn" [title]="note.title">{{
               note.label
@@ -162,6 +173,10 @@ const STORAGE_KEY = 'loco.panels.v1';
     }
 
     <loco-spinner />
+
+    @if (helpOpen()) {
+      <loco-metrics-help (closed)="helpOpen.set(false)" />
+    }
   `,
   styles: [
     `
@@ -257,6 +272,26 @@ const STORAGE_KEY = 'loco.panels.v1';
       .restoring {
         opacity: 0.7;
         font-size: 13px;
+      }
+      .help {
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        border: 1px solid var(--border);
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        font-size: 11px;
+        line-height: 1;
+        padding: 0;
+        cursor: pointer;
+        opacity: 0.55;
+        flex-shrink: 0;
+      }
+      .help:hover {
+        opacity: 1;
+        border-color: var(--accent);
+        color: var(--accent);
       }
       .cache {
         font-size: 10px;
@@ -404,6 +439,7 @@ export class ShellComponent {
   private readonly registry = inject(VizRegistry);
   private readonly destroyRef = inject(DestroyRef);
   readonly errorMessage = signal<string | null>(null);
+  readonly helpOpen = signal(false);
 
   readonly collapsedWidth = COLLAPSED_WIDTH;
 

@@ -26,6 +26,11 @@ import {
   metricValue,
 } from '../../core/models/tree';
 
+/** Tooltip box metrics, kept in step with the .tip rule below. */
+const TIP_WIDTH = 320;
+const TIP_HEIGHT = 74;
+const TIP_GAP = 8;
+
 type EmptyReason =
   | { kind: 'no-project' }
   | { kind: 'no-matches'; canClearFilters: boolean; userIgnoreCount: number }
@@ -153,7 +158,13 @@ interface TileDatum {
       }
 
       @if (tip(); as t) {
-        <div class="tip" [style.left.px]="t.x" [style.top.px]="t.y">
+        <div
+          class="tip"
+          [class.flip-x]="t.flipX"
+          [class.flip-y]="t.flipY"
+          [style.left.px]="t.x"
+          [style.top.px]="t.y"
+        >
           <div class="tip-path">{{ t.path }}</div>
           <div class="tip-row">
             LOC <strong>{{ t.loc }}</strong>
@@ -281,6 +292,17 @@ interface TileDatum {
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
         max-width: 320px;
         transform: translate(8px, 8px);
+        /* The pane clips at its edges, so near the right or bottom the tooltip is
+           re-anchored to the opposite corner of the cursor rather than squeezed. */
+      }
+      .tip.flip-x {
+        transform: translate(calc(-100% - 8px), 8px);
+      }
+      .tip.flip-y {
+        transform: translate(8px, calc(-100% - 8px));
+      }
+      .tip.flip-x.flip-y {
+        transform: translate(calc(-100% - 8px), calc(-100% - 8px));
         z-index: 10;
       }
       .tip-path {
@@ -348,6 +370,9 @@ export class TreemapComponent implements AfterViewInit {
   readonly tip = signal<{
     x: number;
     y: number;
+    /** Anchor the tooltip by its right edge — set when it would overflow the pane. */
+    flipX: boolean;
+    flipY: boolean;
     path: string;
     loc: number;
     complexity: number;
@@ -416,9 +441,15 @@ export class TreemapComponent implements AfterViewInit {
 
   onHover(ev: MouseEvent, t: TileDatum): void {
     const rect = this.wrap.nativeElement.getBoundingClientRect();
+    const x = ev.clientX - rect.left;
+    const y = ev.clientY - rect.top;
     this.tip.set({
-      x: ev.clientX - rect.left,
-      y: ev.clientY - rect.top,
+      x,
+      y,
+      // Flip rather than let the pane squeeze the box: the widths here match the
+      // tooltip's max-width and its typical height.
+      flipX: x + TIP_WIDTH + TIP_GAP > rect.width,
+      flipY: y + TIP_HEIGHT + TIP_GAP > rect.height,
       path: isFile(t.node) ? t.node.path : t.node.path + '/',
       loc: t.loc,
       complexity: t.complexity,

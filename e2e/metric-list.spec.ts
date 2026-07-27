@@ -52,10 +52,15 @@ test.describe('Metric list viz', () => {
     expect(asc[0]).toBeLessThanOrEqual(desc[0]);
   });
 
-  test('the row filter narrows the list to matching paths', async ({ page }) => {
+  test('rows follow the toolbar name filter rather than a filter of their own', async ({
+    page,
+  }) => {
     const before = await page.locator('loco-metric-list .row').count();
+    // The list deliberately has no name/path box — that lives in the toolbar and
+    // applies to every viz at once.
+    await expect(page.locator('loco-metric-list input[type="search"]')).toHaveCount(0);
 
-    await page.locator('loco-metric-list .search').fill('worker');
+    await page.locator('loco-filter-bar input[placeholder*="name"]').fill('worker');
     await expect(page.locator('loco-metric-list .row').first()).toBeVisible();
 
     const after = await page.locator('loco-metric-list .row').count();
