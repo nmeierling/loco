@@ -1,14 +1,11 @@
 import { expect, test } from '@playwright/test';
-import { SRC_DIR } from './fixtures';
+import { FIXTURE_DIR, resetApp } from './fixtures';
 
 test('spinner shows during the directory-read phase (before analysis kicks in)', async ({
   page,
   browser,
 }) => {
-  await page.goto('/');
-  await page.evaluate(() => localStorage.clear());
-  await page.reload();
-  await page.waitForSelector('loco-drop-zone');
+  await resetApp(page);
 
   // Throttle CPU so the read is slow enough for the spinner to appear
   const cdp = await browser.newBrowserCDPSession();
@@ -24,13 +21,17 @@ test('spinner shows during the directory-read phase (before analysis kicks in)',
 
   // Capture the headline text while the spinner is visible
   const headlinePromise = page
-    .waitForFunction(() => {
-      const h = document.querySelector<HTMLElement>('loco-spinner .line');
-      return h ? h.textContent ?? '' : null;
-    }, null, { timeout: 15_000 })
+    .waitForFunction(
+      () => {
+        const h = document.querySelector<HTMLElement>('loco-spinner .line');
+        return h ? (h.textContent ?? '') : null;
+      },
+      null,
+      { timeout: 15_000 },
+    )
     .then((handle) => handle.jsonValue());
 
-  await page.locator('loco-drop-zone input[type="file"]').setInputFiles(SRC_DIR);
+  await page.locator('loco-drop-zone input[type="file"]').setInputFiles(FIXTURE_DIR);
 
   const overlayShown = await seen;
   expect(overlayShown).toBe(true);

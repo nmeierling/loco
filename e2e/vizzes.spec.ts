@@ -1,9 +1,52 @@
-import { expect, test } from '@playwright/test';
-import { loadLocoSrc, selectViz } from './fixtures';
+import { Page, expect, test } from '@playwright/test';
+import { loadFixture, selectViz } from './fixtures';
+
+/** Blocks until the force layout stops moving nodes around. */
+async function settleGraph(page: Page): Promise<void> {
+  let previous = '';
+  for (let i = 0; i < 40; i++) {
+    const positions = await page.$$eval('loco-module-graph svg circle', (cs) =>
+      cs
+        .slice(0, 5)
+        .map(
+          (c) =>
+            `${c.getBoundingClientRect().x.toFixed(1)},${c.getBoundingClientRect().y.toFixed(1)}`,
+        )
+        .join('|'),
+    );
+    if (positions !== '' && positions === previous) return;
+    previous = positions;
+    await page.waitForTimeout(100);
+  }
+}
+
+/** Double-clicks the first module-graph node whose box sits inside the viewport. */
+async function dblclickVisibleNode(page: Page): Promise<void> {
+  // Scanning boxes mid-simulation picks a node that has moved on by the time we click.
+  await settleGraph(page);
+  const circles = page.locator('loco-module-graph svg circle');
+  const viewport = page.viewportSize();
+  if (!viewport) throw new Error('no viewport');
+  const count = await circles.count();
+  for (let i = 0; i < count; i++) {
+    const box = await circles.nth(i).boundingBox();
+    if (!box) continue;
+    if (
+      box.x >= 0 &&
+      box.y >= 0 &&
+      box.x + box.width <= viewport.width &&
+      box.y + box.height <= viewport.height
+    ) {
+      await circles.nth(i).dblclick();
+      return;
+    }
+  }
+  throw new Error(`none of the ${count} graph nodes are inside the viewport`);
+}
 
 test.describe('Alternative vizzes (sunburst, module graph, dep matrix)', () => {
   test('List leads the viz chips but the treemap is what opens', async ({ page }) => {
-    await loadLocoSrc(page);
+    await loadFixture(page);
 
     const chips = page.locator('loco-filter-bar .group', { hasText: 'viz' }).locator('.chip');
     await expect(chips.first()).toHaveText('List');
@@ -15,7 +58,7 @@ test.describe('Alternative vizzes (sunburst, module graph, dep matrix)', () => {
   });
 
   test('sunburst renders segments and clicking a file segment selects it', async ({ page }) => {
-    await loadLocoSrc(page);
+    await loadFixture(page);
     await selectViz(page, 'Sunburst');
 
     await expect(page.locator('loco-sunburst svg path').first()).toBeVisible({ timeout: 10_000 });
@@ -28,16 +71,18 @@ test.describe('Alternative vizzes (sunburst, module graph, dep matrix)', () => {
   });
 
   test('module graph builds, renders nodes + edges, dbl-click opens AST', async ({ page }) => {
-    await loadLocoSrc(page);
+    await loadFixture(page);
     await selectViz(page, 'Module graph');
 
-    await page.waitForSelector('loco-module-graph svg circle', { timeout: 60_000 });
+    await page.waitForSelector('loco-module-graph svg circle');
     const nodes = await page.locator('loco-module-graph svg circle').count();
     const edges = await page.locator('loco-module-graph svg line').count();
     expect(nodes).toBeGreaterThan(5);
     expect(edges).toBeGreaterThan(5);
 
-    await page.locator('loco-module-graph svg circle').first().dblclick();
+    // The force layout spreads nodes beyond the visible area on a graph this size, so
+    // pick one that is actually on screen rather than whichever comes first in the DOM.
+    await dblclickVisibleNode(page);
     await page.waitForURL(/\/ast$/);
     await expect(page.locator('loco-ast-view loco-ast-node').first()).toBeVisible();
   });
@@ -45,7 +90,7 @@ test.describe('Alternative vizzes (sunburst, module graph, dep matrix)', () => {
   test('minimap drag clamps the viewport at the graph edge (no rescale shrink)', async ({
     page,
   }) => {
-    await loadLocoSrc(page);
+    await loadFixture(page);
     await selectViz(page, 'Module graph');
     await page.waitForSelector('loco-module-graph svg circle');
     // Let the simulation settle so node bounds stabilise.
@@ -88,7 +133,7 @@ test.describe('Alternative vizzes (sunburst, module graph, dep matrix)', () => {
   });
 
   test('module graph shows a minimap; clicking it pans the main view', async ({ page }) => {
-    await loadLocoSrc(page);
+    await loadFixture(page);
     await selectViz(page, 'Module graph');
     await page.waitForSelector('loco-module-graph svg circle');
     const minimap = page.locator('loco-module-graph svg.minimap');
@@ -113,10 +158,10 @@ test.describe('Alternative vizzes (sunburst, module graph, dep matrix)', () => {
   });
 
   test('dep matrix opens at folder level and drills down on a folder label', async ({ page }) => {
-    await loadLocoSrc(page);
+    await loadFixture(page);
     await selectViz(page, 'Dep matrix');
 
-    await page.waitForSelector('loco-dependency-matrix svg rect', { timeout: 60_000 });
+    await page.waitForSelector('loco-dependency-matrix svg rect');
 
     // Folder mode is the default: rows are folders (trailing slash) or loose files,
     // and the count stays far below the file count of the repo.
@@ -150,9 +195,9 @@ test.describe('Alternative vizzes (sunburst, module graph, dep matrix)', () => {
   });
 
   test('dep matrix Files mode expands to the full per-file grid', async ({ page }) => {
-    await loadLocoSrc(page);
+    await loadFixture(page);
     await selectViz(page, 'Dep matrix');
-    await page.waitForSelector('loco-dependency-matrix svg rect', { timeout: 60_000 });
+    await page.waitForSelector('loco-dependency-matrix svg rect');
 
     const folderCells = await page.locator('loco-dependency-matrix svg rect').count();
     await page.locator('loco-dependency-matrix .chip', { hasText: 'Files' }).click();

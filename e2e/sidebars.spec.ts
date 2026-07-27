@@ -1,13 +1,15 @@
 import { Page, expect, test } from '@playwright/test';
-import { loadLocoSrc } from './fixtures';
+import { loadFixture } from './fixtures';
 
 async function width(page: Page, selector: string): Promise<number> {
   return page.$eval(selector, (el) => el.getBoundingClientRect().width);
 }
 
 test.describe('Sidebars (left files + right ignore)', () => {
-  test('default widths, resize drag, collapse + reopen, persistence is honored', async ({ page }) => {
-    await loadLocoSrc(page);
+  test('default widths, resize drag, collapse + reopen, persistence is honored', async ({
+    page,
+  }) => {
+    await loadFixture(page);
 
     const left = 'aside.sidebar.left';
     const right = 'aside.sidebar.right';
@@ -38,8 +40,10 @@ test.describe('Sidebars (left files + right ignore)', () => {
     await expect.poll(() => width(page, right)).toBe(280);
   });
 
-  test('file rows show LOC counts; clicking a file populates Selected in the ignore panel', async ({ page }) => {
-    await loadLocoSrc(page);
+  test('file rows show LOC counts; clicking a file populates Selected in the ignore panel', async ({
+    page,
+  }) => {
+    await loadFixture(page);
     const fileRow = page.locator('loco-directory-tree .row.file').first();
     await expect(fileRow.locator('.meta')).toHaveText(/\d/);
 

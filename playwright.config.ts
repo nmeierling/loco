@@ -9,8 +9,10 @@ export default defineConfig({
   retries: process.env['CI'] ? 2 : 0,
   workers: 1,
   reporter: process.env['CI'] ? 'line' : 'list',
-  timeout: 60_000,
-  expect: { timeout: 10_000 },
+  // The fixture project is tiny, so anything slower than this is a hang, not work.
+  // The one genuinely slow spec raises its own budget with test.setTimeout().
+  timeout: 15_000,
+  expect: { timeout: 5_000 },
   use: {
     baseURL: BASE_URL,
     headless: true,
@@ -22,7 +24,9 @@ export default defineConfig({
     command: `npx ng serve --port ${PORT} --host 127.0.0.1`,
     url: BASE_URL,
     reuseExistingServer: !process.env['CI'],
-    timeout: 180_000,
+    // A cold `ng serve` build is well under this; overshooting only delays the report
+    // when an AOT error makes the server never come up (see AGENTS.md).
+    timeout: 90_000,
     stdout: 'pipe',
     stderr: 'pipe',
   },

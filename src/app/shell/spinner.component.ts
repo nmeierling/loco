@@ -129,7 +129,9 @@ export class SpinnerComponent {
   readonly visible = computed(() => {
     const p = this.status().phase;
     // Churn is deliberately absent: it runs in the background once the tree is up.
-    return p === 'reading' || p === 'loading' || p === 'counting' || p === 'parsing';
+    return (
+      p === 'reading' || p === 'loading' || p === 'counting' || p === 'parsing' || p === 'restoring'
+    );
   });
 
   readonly headline = computed(() => {
@@ -143,6 +145,8 @@ export class SpinnerComponent {
         return 'Counting lines…';
       case 'parsing':
         return 'Parsing ASTs…';
+      case 'restoring':
+        return 'Restoring last project…';
       default:
         return '';
     }
@@ -155,6 +159,10 @@ export class SpinnerComponent {
       const n = s.done.toLocaleString();
       return `${n} ${s.done === 1 ? 'file' : 'files'} discovered`;
     }
+    if (s.phase === 'restoring') {
+      if (s.total === 0) return null;
+      return `${s.done.toLocaleString()} / ${s.total.toLocaleString()} files`;
+    }
     if (s.phase !== 'counting' && s.phase !== 'parsing') return null;
     return `${s.done.toLocaleString()} / ${s.total.toLocaleString()}`;
   });
@@ -162,6 +170,10 @@ export class SpinnerComponent {
   readonly progressPct = computed(() => {
     const s = this.status();
     if (s.phase === 'reading') return null;
+    if (s.phase === 'restoring') {
+      if (s.total === 0) return null;
+      return Math.min(100, Math.round((s.done / s.total) * 100));
+    }
     if ((s.phase !== 'counting' && s.phase !== 'parsing') || s.total === 0) return 0;
     return Math.min(100, Math.round((s.done / s.total) * 100));
   });

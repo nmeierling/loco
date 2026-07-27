@@ -1,10 +1,10 @@
+import { resetApp } from './fixtures';
 import { expect, test } from '@playwright/test';
 
-test('cancelling the file picker resets the spinner instead of leaving it stuck', async ({ page }) => {
-  await page.goto('/');
-  await page.evaluate(() => localStorage.clear());
-  await page.reload();
-  await page.waitForSelector('loco-drop-zone');
+test('cancelling the file picker resets the spinner instead of leaving it stuck', async ({
+  page,
+}) => {
+  await resetApp(page);
 
   // Pre-register a filechooser handler so Playwright doesn't hang on the programmatic
   // input.click() inside our openPicker. The handler just keeps a reference; we don't

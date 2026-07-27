@@ -1,0 +1,28 @@
+:root {
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --accent: #3b82f6;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.product-list {
+  display: grid;
+  gap: 8px;
+}
+
+.product-list .row {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 8px;
+}
+
+.cart .total {
+  font-weight: 600;
+  color: var(--accent);
+}

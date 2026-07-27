@@ -10,6 +10,9 @@ import {
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { AnalysisService } from '../core/services/analysis.service';
 import { AnalysisStore } from '../core/state/analysis.store';
+import { SessionService } from '../core/services/session.service';
+import { IgnoreService } from '../core/services/ignore.service';
+import { VizRegistry } from '../viz/viz-registry';
 import { LoadResult } from '../core/services/directory-loader.service';
 import { FilterBarComponent } from '../filters/filter-bar.component';
 import { DropZoneComponent } from './drop-zone.component';
@@ -58,13 +61,22 @@ const STORAGE_KEY = 'loco.panels.v1';
       </nav>
       @if (store.root(); as r) {
         <div class="root">
+          @if (cacheNote(); as note) {
+            <span class="cache" [class.warn]="note.warn" [title]="note.title">{{
+              note.label
+            }}</span>
+          }
           <span class="root-name" [title]="store.rootName()">{{ store.rootName() }}</span>
           <button class="ghost" type="button" (click)="reset()">change folder</button>
         </div>
       }
     </header>
 
-    @if (!store.root()) {
+    @if (session.restoring()) {
+      <section class="welcome">
+        <div class="restoring">Restoring the last project…</div>
+      </section>
+    } @else if (!store.root()) {
       <section class="welcome">
         <loco-drop-zone
           (started)="onReadingStarted()"
@@ -242,6 +254,24 @@ const STORAGE_KEY = 'loco.panels.v1';
         color: var(--danger);
         font-size: 12px;
       }
+      .restoring {
+        opacity: 0.7;
+        font-size: 13px;
+      }
+      .cache {
+        font-size: 10px;
+        opacity: 0.5;
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        padding: 1px 6px;
+        white-space: nowrap;
+        cursor: default;
+      }
+      .cache.warn {
+        color: var(--danger);
+        border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+        opacity: 0.8;
+      }
       .body {
         flex: 1;
         display: flex;
@@ -368,7 +398,10 @@ const STORAGE_KEY = 'loco.panels.v1';
 })
 export class ShellComponent {
   readonly store = inject(AnalysisStore);
+  readonly session = inject(SessionService);
   private readonly analysis = inject(AnalysisService);
+  private readonly ig = inject(IgnoreService);
+  private readonly registry = inject(VizRegistry);
   private readonly destroyRef = inject(DestroyRef);
   readonly errorMessage = signal<string | null>(null);
 
@@ -380,9 +413,29 @@ export class ShellComponent {
 
   private dragging: { side: Side; startX: number; startWidth: number } | null = null;
 
+  /** Tells the user whether what they are looking at is a cached copy, and how old. */
+  readonly cacheNote = computed<{ label: string; title: string; warn: boolean } | null>(() => {
+    const skipped = this.session.notCached();
+    if (skipped) return { label: 'not cached', title: skipped, warn: true };
+    const savedAt = this.session.savedAt();
+    if (savedAt === null) return null;
+    return {
+      label: `cached ${relativeTime(savedAt, this.now())}`,
+      title:
+        'This project is kept in browser storage so a reload resumes here. It is a snapshot ' +
+        'from when it was analysed — re-pick the folder to see changes made since.',
+      warn: false,
+    };
+  });
+
+  /** Coarse clock so the cached-at label ages without a per-second re-render. */
+  private readonly now = signal(Date.now());
+
   readonly statusLine = computed(() => {
     const s = this.store.status();
     switch (s.phase) {
+      case 'restoring':
+        return s.total > 0 ? `Restoring ${s.done}/${s.total} files…` : 'Restoring last project…';
       case 'reading':
         return `Reading ${s.done.toLocaleString()} files…`;
       case 'loading':
@@ -432,6 +485,23 @@ export class ShellComponent {
   }
 
   constructor() {
+    void this.restoreSession();
+
+    // Filters, selection, ignore patterns and the active viz are cheap to rewrite, so
+    // they follow the user rather than waiting for the next analysis.
+    effect(() => {
+      this.store.filters();
+      this.store.selectedPath();
+      this.ig.userPatterns();
+      this.session.queueMeta();
+    });
+    effect(() => {
+      this.session.setViz(this.registry.selectedId());
+    });
+
+    const tick = setInterval(() => this.now.set(Date.now()), 60_000);
+    this.destroyRef.onDestroy(() => clearInterval(tick));
+
     effect(() => {
       const data = { left: this.left(), right: this.right() };
       try {
@@ -514,8 +584,25 @@ export class ShellComponent {
 
   reset(): void {
     this.store.clear();
+    this.ig.clearUserPatterns();
     this.errorMessage.set(null);
+    void this.session.discard();
   }
+
+  private async restoreSession(): Promise<void> {
+    const vizId = await this.session.restore();
+    if (vizId) this.registry.select(vizId);
+  }
+}
+
+function relativeTime(then: number, now: number): string {
+  const seconds = Math.max(0, Math.round((now - then) / 1000));
+  if (seconds < 60) return 'just now';
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
 }
 
 function clampState(s: PanelState | undefined): PanelState | null {

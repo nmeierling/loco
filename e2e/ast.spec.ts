@@ -1,14 +1,14 @@
 import { expect, test } from '@playwright/test';
-import { expandFolder, loadLocoSrc } from './fixtures';
+import { expandFolder, loadFixture } from './fixtures';
 
 test.describe('AST view + source panel + call graph', () => {
   test('double-click a sidebar file opens the AST view with a source pane', async ({ page }) => {
-    await loadLocoSrc(page);
+    await loadFixture(page);
     await expandFolder(page, 'core');
     await expandFolder(page, 'services');
 
     await page
-      .locator('loco-directory-tree .row.file', { hasText: 'analysis.service.ts' })
+      .locator('loco-directory-tree .row.file', { hasText: 'catalog.service.ts' })
       .first()
       .dblclick();
 
@@ -22,11 +22,11 @@ test.describe('AST view + source panel + call graph', () => {
   });
 
   test('clicking an AST node highlights the matching range in the source', async ({ page }) => {
-    await loadLocoSrc(page);
+    await loadFixture(page);
     await expandFolder(page, 'core');
     await expandFolder(page, 'services');
     await page
-      .locator('loco-directory-tree .row.file', { hasText: 'analysis.service.ts' })
+      .locator('loco-directory-tree .row.file', { hasText: 'catalog.service.ts' })
       .first()
       .dblclick();
     await page.waitForURL(/\/ast$/);
@@ -43,11 +43,11 @@ test.describe('AST view + source panel + call graph', () => {
   });
 
   test('Calls toggle renders a per-file call graph for a TS file', async ({ page }) => {
-    await loadLocoSrc(page);
+    await loadFixture(page);
     await expandFolder(page, 'core');
     await expandFolder(page, 'services');
     await page
-      .locator('loco-directory-tree .row.file', { hasText: 'analysis.service.ts' })
+      .locator('loco-directory-tree .row.file', { hasText: 'catalog.service.ts' })
       .first()
       .dblclick();
     await page.waitForURL(/\/ast$/);
@@ -56,7 +56,9 @@ test.describe('AST view + source panel + call graph', () => {
     await expect(callsBtn).toBeEnabled();
     await callsBtn.click();
 
-    await expect(page.locator('loco-call-graph svg circle').first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('loco-call-graph svg circle').first()).toBeVisible({
+      timeout: 10_000,
+    });
     const count = await page.locator('loco-call-graph svg circle').count();
     expect(count).toBeGreaterThan(0);
   });

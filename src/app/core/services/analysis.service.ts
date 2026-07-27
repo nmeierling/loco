@@ -5,6 +5,7 @@ import { LocInput, LocService } from './loc.service';
 import { IgnoreService } from './ignore.service';
 import { ComplexityService } from './complexity.service';
 import { GitChurnService } from './git-churn.service';
+import { SessionService } from './session.service';
 import { DirNode, FileNode } from '../models/tree';
 import { detectLanguage, extOf } from '../languages';
 
@@ -15,6 +16,7 @@ export class AnalysisService {
   private readonly ig = inject(IgnoreService);
   private readonly complexity = inject(ComplexityService);
   private readonly churn = inject(GitChurnService);
+  private readonly session = inject(SessionService);
 
   async analyze(load: LoadResult): Promise<void> {
     this.store.status.set({ phase: 'loading', message: `Reading ${load.rootName}…` });
@@ -74,6 +76,10 @@ export class AnalysisService {
     this.store.setRoot(root, load.rootName, blobs);
     this.store.status.set({ phase: 'ready' });
 
+    // Cache the analysed project so a reload skips the folder pick. Off the critical
+    // path — the tree is already on screen.
+    void this.session.saveProject();
+
     // Walking history is the slowest part of the analysis and nothing on screen
     // depends on it, so it runs after the tree is up and folds its results in later.
     if (hasGit) {
@@ -107,6 +113,9 @@ export class AnalysisService {
         filesWithChurn: matched,
         commitsScanned: result.commitsScanned,
       });
+      // The cached tree predates these numbers, and `.git/` is not cached, so a
+      // restored session can never recompute them — rewrite the tree now.
+      void this.session.saveTree();
       console.info(
         '[loco] churn: scanned %d commits, %d files matched a git path; sample git paths: %o',
         result.commitsScanned,

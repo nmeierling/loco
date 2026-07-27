@@ -1,5 +1,5 @@
 import { Page, expect, test } from '@playwright/test';
-import { loadLocoSrc, selectViz } from './fixtures';
+import { loadFixture, selectViz } from './fixtures';
 
 /** Numeric text of the nth cell of each rendered row (commas stripped, em-dash → null). */
 async function columnValues(page: Page, cellIndex: number): Promise<(number | null)[]> {
@@ -21,7 +21,7 @@ const COMPLEXITY_COL = 4;
 
 test.describe('Metric list viz', () => {
   test.beforeEach(async ({ page }) => {
-    await loadLocoSrc(page);
+    await loadFixture(page);
     await selectViz(page, 'List');
     await expect(page.locator('loco-metric-list .row').first()).toBeVisible();
   });
@@ -70,14 +70,14 @@ test.describe('Metric list viz', () => {
 
   test('a per-metric minimum drops every row below the threshold', async ({ page }) => {
     const minLoc = page.locator('loco-metric-list .pick', { hasText: 'min loc' }).locator('input');
-    await minLoc.fill('200');
+    await minLoc.fill('50');
     await expect(page.locator('loco-metric-list .row').first()).toBeVisible();
 
     const loc = await columnValues(page, LOC_COL);
     expect(loc.length).toBeGreaterThan(0);
     for (const v of loc) {
       expect(v).not.toBeNull();
-      expect(v as number).toBeGreaterThanOrEqual(200);
+      expect(v as number).toBeGreaterThanOrEqual(50);
     }
 
     // An impossible threshold yields the dedicated empty state, not a blank table.

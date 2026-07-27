@@ -1,11 +1,11 @@
 import { expect, test } from '@playwright/test';
-import { expandFolder, loadLocoSrc } from './fixtures';
+import { expandFolder, loadFixture } from './fixtures';
 
 test.describe('Empty-state, resizable AST split, syntax highlighting', () => {
   test('treemap shows a tailored "no matches" empty state + clear button restores tiles', async ({
     page,
   }) => {
-    await loadLocoSrc(page);
+    await loadFixture(page);
     const initial = await page.locator('loco-treemap svg rect').count();
     expect(initial).toBeGreaterThan(10);
 
@@ -27,11 +27,11 @@ test.describe('Empty-state, resizable AST split, syntax highlighting', () => {
   test('AST view: dragging the divider resizes the split and persists to localStorage', async ({
     page,
   }) => {
-    await loadLocoSrc(page);
+    await loadFixture(page);
     await expandFolder(page, 'core');
     await expandFolder(page, 'services');
     await page
-      .locator('loco-directory-tree .row.file', { hasText: 'analysis.service.ts' })
+      .locator('loco-directory-tree .row.file', { hasText: 'catalog.service.ts' })
       .first()
       .dblclick();
     await page.waitForURL(/\/ast$/);
@@ -71,26 +71,26 @@ test.describe('Empty-state, resizable AST split, syntax highlighting', () => {
   test('source panel: keywords, strings, and comments get colored token spans', async ({
     page,
   }) => {
-    await loadLocoSrc(page);
+    await loadFixture(page);
     await expandFolder(page, 'core');
     await expandFolder(page, 'services');
     await page
-      .locator('loco-directory-tree .row.file', { hasText: 'analysis.service.ts' })
+      .locator('loco-directory-tree .row.file', { hasText: 'catalog.service.ts' })
       .first()
       .dblclick();
     await page.waitForURL(/\/ast$/);
     await expect(page.locator('loco-source-panel .row').first()).toBeVisible();
 
     // We expect at least a handful of each token kind in any TS service file.
-    await expect.poll(() => page.locator('loco-source-panel .tok-keyword').count()).toBeGreaterThan(
-      5,
-    );
-    await expect.poll(() => page.locator('loco-source-panel .tok-string').count()).toBeGreaterThan(
-      0,
-    );
-    await expect.poll(() => page.locator('loco-source-panel .tok-ident').count()).toBeGreaterThan(
-      5,
-    );
+    await expect
+      .poll(() => page.locator('loco-source-panel .tok-keyword').count())
+      .toBeGreaterThan(5);
+    await expect
+      .poll(() => page.locator('loco-source-panel .tok-string').count())
+      .toBeGreaterThan(0);
+    await expect
+      .poll(() => page.locator('loco-source-panel .tok-ident').count())
+      .toBeGreaterThan(5);
 
     // First keyword should be 'import' on the first source line.
     const firstKw = await page.locator('loco-source-panel .tok-keyword').first().textContent();

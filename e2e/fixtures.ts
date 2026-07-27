@@ -1,24 +1,46 @@
 import { Page, expect } from '@playwright/test';
 import * as path from 'node:path';
 
-/** Path to the project's own src/ directory — used as a stable test corpus. */
-export const SRC_DIR = path.resolve(__dirname, '..', 'src');
+/**
+ * The corpus every spec analyses. It is a checked-in fake project rather than loco's
+ * own `src/`, so adding a file to this repo cannot silently change tile counts, graph
+ * layout or usage totals. See its README for the shape the specs depend on.
+ */
+export const FIXTURE_DIR = path.resolve(__dirname, 'fixtures-data', 'sample-app');
 
-/** Loads the loco src/ folder via the webkitdirectory input and waits until analysis settles. */
-export async function loadLocoSrc(page: Page): Promise<void> {
+/** Folder name the app shows once the fixture is loaded. */
+export const FIXTURE_ROOT_NAME = 'sample-app';
+
+/**
+ * Wipes every scrap of persisted state and lands on the folder picker. The session
+ * cache lives in IndexedDB, so clearing localStorage alone would restore the previous
+ * test's project.
+ */
+export async function resetApp(page: Page): Promise<void> {
   await page.goto('/');
-  await page.evaluate(() => localStorage.clear());
+  await page.evaluate(async () => {
+    localStorage.clear();
+    await new Promise<void>((resolve) => {
+      const req = indexedDB.deleteDatabase('loco-session');
+      req.onsuccess = () => resolve();
+      req.onerror = () => resolve();
+      req.onblocked = () => resolve();
+    });
+  });
   await page.reload();
   await page.waitForSelector('loco-drop-zone');
+}
+
+/** Loads the fixture project via the webkitdirectory input and waits until it settles. */
+export async function loadFixture(page: Page): Promise<void> {
+  await resetApp(page);
 
   const input = page.locator('loco-drop-zone input[type="file"]');
-  await input.setInputFiles(SRC_DIR);
+  await input.setInputFiles(FIXTURE_DIR);
 
-  // Wait for the treemap to render (default viz) and any spinner to dismiss
-  await page.waitForSelector('loco-treemap svg', { timeout: 30_000 });
-  await page
-    .waitForSelector('loco-spinner .overlay', { state: 'hidden', timeout: 60_000 })
-    .catch(() => undefined);
+  // The treemap is the default viz; the spinner clears once analysis finishes.
+  await page.waitForSelector('loco-treemap svg');
+  await page.waitForSelector('loco-spinner .overlay', { state: 'hidden' }).catch(() => undefined);
   await expect(page.locator('loco-treemap svg rect').first()).toBeVisible();
 }
 
@@ -35,4 +57,12 @@ export async function expandFolder(page: Page, name: string): Promise<void> {
   if (chev.includes('▸')) {
     await row.click();
   }
+}
+
+/** Opens a fixture file in the AST view through the list viz. */
+export async function openInAst(page: Page, nameFragment: string): Promise<void> {
+  await selectViz(page, 'List');
+  await page.locator('loco-metric-list .search').fill(nameFragment);
+  await page.locator('loco-metric-list .row').first().dblclick();
+  await page.waitForURL(/\/ast$/);
 }

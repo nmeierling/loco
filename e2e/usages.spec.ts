@@ -1,42 +1,32 @@
-import { Page, expect, test } from '@playwright/test';
-import { loadLocoSrc, selectViz } from './fixtures';
-
-/** Opens a file in the AST view by name, via the list viz. */
-async function openInAst(page: Page, nameFragment: string): Promise<void> {
-  await selectViz(page, 'List');
-  await page.locator('loco-metric-list .search').fill(nameFragment);
-  await page.locator('loco-metric-list .row').first().dblclick();
-  await page.waitForURL(/\/ast$/);
-}
+import { expect, test } from '@playwright/test';
+import { loadFixture, openInAst } from './fixtures';
 
 test.describe('AST usages panel', () => {
   test('lists the symbols a file declares with their repo-wide usage counts', async ({ page }) => {
-    await loadLocoSrc(page);
-    await openInAst(page, 'analysis.store');
+    await loadFixture(page);
+    await openInAst(page, 'catalog.store');
     await page.locator('loco-ast-view .mode', { hasText: 'Usages' }).click();
 
     const rows = page.locator('loco-usages-panel .sym-head');
-    await expect(rows.first()).toBeVisible({ timeout: 60_000 });
+    await expect(rows.first()).toBeVisible();
 
     // The store class itself is imported all over the app.
-    const classRow = rows.filter({ hasText: 'AnalysisStore' }).first();
+    const classRow = rows.filter({ hasText: 'CatalogStore' }).first();
     await expect(classRow).toContainText(/\d+ in \d+ files/);
 
     // Its methods are listed as members and are used outside this file.
-    const method = rows.filter({ hasText: 'selectPath' }).first();
+    const method = rows.filter({ hasText: 'selectProduct' }).first();
     await expect(method).toContainText('method');
     await expect(method).toContainText(/\d+ in \d+ files/);
   });
 
   test('expanding a symbol shows call sites grouped by file', async ({ page }) => {
-    await loadLocoSrc(page);
-    await openInAst(page, 'analysis.store');
+    await loadFixture(page);
+    await openInAst(page, 'catalog.store');
     await page.locator('loco-ast-view .mode', { hasText: 'Usages' }).click();
-    await expect(page.locator('loco-usages-panel .sym-head').first()).toBeVisible({
-      timeout: 60_000,
-    });
+    await expect(page.locator('loco-usages-panel .sym-head').first()).toBeVisible();
 
-    await page.locator('loco-usages-panel .sym-head', { hasText: 'selectPath' }).first().click();
+    await page.locator('loco-usages-panel .sym-head', { hasText: 'selectProduct' }).first().click();
 
     const refs = page.locator('loco-usages-panel .ref');
     await expect(refs.first()).toBeVisible();
@@ -45,17 +35,15 @@ test.describe('AST usages panel', () => {
     // Usages come from more than one file, and each carries its source line.
     const files = await page.locator('loco-usages-panel .ref-path').allTextContents();
     expect(new Set(files).size).toBeGreaterThan(1);
-    await expect(refs.first().locator('code')).toContainText('selectPath');
+    await expect(refs.first().locator('code')).toContainText('selectProduct');
   });
 
   test('clicking a usage opens that file and highlights the line', async ({ page }) => {
-    await loadLocoSrc(page);
-    await openInAst(page, 'analysis.store');
+    await loadFixture(page);
+    await openInAst(page, 'catalog.store');
     await page.locator('loco-ast-view .mode', { hasText: 'Usages' }).click();
-    await expect(page.locator('loco-usages-panel .sym-head').first()).toBeVisible({
-      timeout: 60_000,
-    });
-    await page.locator('loco-usages-panel .sym-head', { hasText: 'selectPath' }).first().click();
+    await expect(page.locator('loco-usages-panel .sym-head').first()).toBeVisible();
+    await page.locator('loco-usages-panel .sym-head', { hasText: 'selectProduct' }).first().click();
 
     const before = await page.locator('loco-ast-view .path').textContent();
     const target = page.locator('loco-usages-panel .ref').first();
@@ -71,26 +59,24 @@ test.describe('AST usages panel', () => {
   });
 
   test('the Uses tab lists symbols this file pulls in from elsewhere', async ({ page }) => {
-    await loadLocoSrc(page);
-    await openInAst(page, 'ast-selection.service');
+    await loadFixture(page);
+    await openInAst(page, 'cart.component');
     await page.locator('loco-ast-view .mode', { hasText: 'Usages' }).click();
-    await expect(page.locator('loco-usages-panel .sym-head').first()).toBeVisible({
-      timeout: 60_000,
-    });
+    await expect(page.locator('loco-usages-panel .sym-head').first()).toBeVisible();
 
     await page.locator('loco-usages-panel .tabs button', { hasText: 'Uses' }).click();
 
     const rows = page.locator('loco-usages-panel .sym-head');
     await expect(rows.first()).toBeVisible();
-    // It injects AnalysisStore, so the store and the methods it calls show up here.
-    await expect(rows.filter({ hasText: 'AnalysisStore' }).first()).toBeVisible();
-    await expect(rows.filter({ hasText: 'AnalysisStore' }).first()).toContainText(
-      'app/core/state/analysis.store.ts',
+    // It injects CatalogStore, so the store and the methods it calls show up here.
+    await expect(rows.filter({ hasText: 'CatalogStore' }).first()).toBeVisible();
+    await expect(rows.filter({ hasText: 'CatalogStore' }).first()).toContainText(
+      'app/core/state/catalog.store.ts',
     );
   });
 
   test('the Usages tab is disabled for a language with no symbol index', async ({ page }) => {
-    await loadLocoSrc(page);
+    await loadFixture(page);
     await openInAst(page, 'index.html');
 
     // index.html has no grammar at all, so the AST view never reaches the ready state

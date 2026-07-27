@@ -1,10 +1,17 @@
 import { expect, test } from '@playwright/test';
-import { loadLocoSrc } from './fixtures';
+import { loadFixture } from './fixtures';
 
 test.describe('Ignore panel', () => {
   test('language sections are present and expandable', async ({ page }) => {
-    await loadLocoSrc(page);
-    const labels = ['VCS, builds & caches', 'Editor & OS files', 'JavaScript / TypeScript', 'Python', 'Rust', '.NET'];
+    await loadFixture(page);
+    const labels = [
+      'VCS, builds & caches',
+      'Editor & OS files',
+      'JavaScript / TypeScript',
+      'Python',
+      'Rust',
+      '.NET',
+    ];
     for (const label of labels) {
       await expect(page.locator('loco-ignore-panel .block-head', { hasText: label })).toBeVisible();
     }
@@ -16,7 +23,7 @@ test.describe('Ignore panel', () => {
   });
 
   test('quick-ignore from a heat tile removes the file from the treemap', async ({ page }) => {
-    await loadLocoSrc(page);
+    await loadFixture(page);
 
     const initial = await page.locator('loco-treemap svg rect').count();
     await page.locator('loco-treemap svg rect').first().click();
@@ -35,17 +42,19 @@ test.describe('Ignore panel', () => {
   });
 
   test('a custom pattern lives in the Custom list and filters the heatmap', async ({ page }) => {
-    await loadLocoSrc(page);
+    await loadFixture(page);
     const initial = await page.locator('loco-treemap svg rect').count();
 
-    await page.locator('loco-ignore-panel input.input').fill('*.spec.ts');
+    await page.locator('loco-ignore-panel input.input').fill('*.component.ts');
     await page.locator('loco-ignore-panel .add-btn').click();
     await page.waitForTimeout(150);
 
     const after = await page.locator('loco-treemap svg rect').count();
     expect(after).toBeLessThan(initial);
     await expect(
-      page.locator('loco-ignore-panel .patterns:not(.ro) .pattern code', { hasText: '*.spec.ts' }),
+      page.locator('loco-ignore-panel .patterns:not(.ro) .pattern code', {
+        hasText: '*.component.ts',
+      }),
     ).toBeVisible();
   });
 });

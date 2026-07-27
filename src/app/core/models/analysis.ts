@@ -1,5 +1,6 @@
 export type AnalysisPhase =
   | { phase: 'idle' }
+  | { phase: 'restoring'; done: number; total: number }
   | { phase: 'reading'; done: number }
   | { phase: 'loading'; message: string }
   | { phase: 'counting'; done: number; total: number }

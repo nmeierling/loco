@@ -1,9 +1,9 @@
 import { expect, test } from '@playwright/test';
-import { expandFolder, loadLocoSrc, selectViz } from './fixtures';
+import { expandFolder, loadFixture, selectViz } from './fixtures';
 
 test.describe('Path filter — sidebar funnel + viz-wide application', () => {
   test('funnel icon on a directory row sets the path filter', async ({ page }) => {
-    await loadLocoSrc(page);
+    await loadFixture(page);
 
     // Expand into a known subfolder
     await expandFolder(page, 'core');
@@ -19,7 +19,7 @@ test.describe('Path filter — sidebar funnel + viz-wide application', () => {
   test('path filter shrinks treemap tile count (still wider than tall after re-layout)', async ({
     page,
   }) => {
-    await loadLocoSrc(page);
+    await loadFixture(page);
 
     const initial = await page.locator('loco-treemap svg rect').count();
     await page.locator('loco-filter-bar input.search.path').fill('app/core');
@@ -37,7 +37,7 @@ test.describe('Path filter — sidebar funnel + viz-wide application', () => {
   });
 
   test('path filter is applied to the module graph viz', async ({ page }) => {
-    await loadLocoSrc(page);
+    await loadFixture(page);
     await selectViz(page, 'Module graph');
     await page.waitForSelector('loco-module-graph svg circle');
 
@@ -51,7 +51,7 @@ test.describe('Path filter — sidebar funnel + viz-wide application', () => {
   });
 
   test('path filter is applied to the dep-matrix viz', async ({ page }) => {
-    await loadLocoSrc(page);
+    await loadFixture(page);
     await selectViz(page, 'Dep matrix');
     await page.waitForSelector('loco-dependency-matrix svg rect');
 
@@ -68,7 +68,7 @@ test.describe('Path filter — sidebar funnel + viz-wide application', () => {
   });
 
   test('clear button next to the path input wipes the filter', async ({ page }) => {
-    await loadLocoSrc(page);
+    await loadFixture(page);
     const initial = await page.locator('loco-treemap svg rect').count();
 
     await page.locator('loco-filter-bar input.search.path').fill('app/core');

@@ -1,9 +1,9 @@
 import { expect, test } from '@playwright/test';
-import { expandFolder, loadLocoSrc } from './fixtures';
+import { expandFolder, loadFixture } from './fixtures';
 
 test.describe('UX tweaks', () => {
   test('treemap shows a color legend in the top-left', async ({ page }) => {
-    await loadLocoSrc(page);
+    await loadFixture(page);
     const legend = page.locator('loco-treemap .legend');
     await expect(legend).toBeVisible();
     await expect(legend.locator('.legend-label')).toHaveText(/complexity/i);
@@ -15,7 +15,7 @@ test.describe('UX tweaks', () => {
   });
 
   test('path filter input has the same width on / and /ast', async ({ page }) => {
-    await loadLocoSrc(page);
+    await loadFixture(page);
     const widthOf = () =>
       page.$eval('loco-filter-bar input.search.path', (el) => el.getBoundingClientRect().width);
     const onHeatmap = await widthOf();
@@ -26,7 +26,7 @@ test.describe('UX tweaks', () => {
   });
 
   test('AST route hides VIZ chips; heatmap route shows them', async ({ page }) => {
-    await loadLocoSrc(page);
+    await loadFixture(page);
     // On heatmap (default), the VIZ row is visible.
     await expect(page.locator('loco-filter-bar .group .label', { hasText: 'viz' })).toBeVisible();
 
@@ -42,7 +42,7 @@ test.describe('UX tweaks', () => {
   });
 
   test('AST route filters the sidebar to AST-supported files', async ({ page }) => {
-    await loadLocoSrc(page);
+    await loadFixture(page);
 
     // On /, every file extension is allowed in the tree.
     await expandFolder(page, 'app');
