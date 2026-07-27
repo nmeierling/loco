@@ -16,7 +16,9 @@ import { detectLanguage } from '../core/languages';
 import { AstSelectionService } from './ast-selection.service';
 import { SourcePanelComponent } from './source-panel.component';
 import { CallGraphComponent } from './call-graph.component';
+import { UsagesPanelComponent } from './usages-panel.component';
 import { isCallGraphSupported } from '../core/services/call-graph';
+import { isSymbolIndexSupported } from '../core/services/symbols';
 
 const SPLIT_KEY = 'loco:ast-split';
 const SPLIT_MIN = 0.15;
@@ -44,7 +46,9 @@ type LoadState =
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="row" (click)="onClick($event)" [class.has-children]="hasChildren()">
-      <span class="chev" (click)="toggle($event)">{{ hasChildren() ? (expanded() ? '▾' : '▸') : '·' }}</span>
+      <span class="chev" (click)="toggle($event)">{{
+        hasChildren() ? (expanded() ? '▾' : '▸') : '·'
+      }}</span>
       <span class="type">{{ node.type }}</span>
       <span class="pos">{{ node.startRow + 1 }}:{{ node.startCol + 1 }}</span>
       @if (node.preview) {
@@ -149,7 +153,13 @@ export class AstNodeComponent {
 @Component({
   selector: 'loco-ast-view',
   standalone: true,
-  imports: [AstNodeComponent, RouterLink, SourcePanelComponent, CallGraphComponent],
+  imports: [
+    AstNodeComponent,
+    RouterLink,
+    SourcePanelComponent,
+    CallGraphComponent,
+    UsagesPanelComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @switch (state().kind) {
@@ -171,9 +181,13 @@ export class AstNodeComponent {
           <h3>{{ stateUnsupportedPath() }}</h3>
           <p>
             No tree-sitter grammar installed for
-            <code>{{ stateUnsupportedLang() ?? 'this file type' }}</code>.
+            <code>{{ stateUnsupportedLang() ?? 'this file type' }}</code
+            >.
           </p>
-          <p class="hint">Supported: TypeScript, TSX, JavaScript, Python, Go, Rust, Java, C/C++, C#, PHP, Ruby, Bash, Kotlin, Swift, Scala, Dart, Lua, Elixir.</p>
+          <p class="hint">
+            Supported: TypeScript, TSX, JavaScript, Python, Go, Rust, Java, C/C++, C#, PHP, Ruby,
+            Bash, Kotlin, Swift, Scala, Dart, Lua, Elixir.
+          </p>
         </div>
       }
       @case ('error') {
@@ -192,17 +206,37 @@ export class AstNodeComponent {
               class="mode"
               [class.active]="mode() === 'tree'"
               (click)="mode.set('tree')"
-            >Tree</button>
+            >
+              Tree
+            </button>
             <button
               type="button"
               class="mode"
               [class.active]="mode() === 'calls'"
               [disabled]="!callsSupported()"
               (click)="mode.set('calls')"
-              [title]="callsSupported() ? 'Function call graph' : 'Call graph only available for TS/JS'"
-            >Calls</button>
+              [title]="
+                callsSupported() ? 'Function call graph' : 'Call graph only available for TS/JS'
+              "
+            >
+              Calls
+            </button>
+            <button
+              type="button"
+              class="mode"
+              [class.active]="mode() === 'usages'"
+              [disabled]="!usagesSupported()"
+              (click)="mode.set('usages')"
+              [title]="
+                usagesSupported()
+                  ? 'Cross-file usages of the symbols in this file'
+                  : 'Usages only available for TS/TSX/JS/JSX'
+              "
+            >
+              Usages
+            </button>
           </div>
-          <span class="caption">{{ mode() === 'tree' ? 'Click an AST node to jump to source.' : 'Click a function to jump to source.' }}</span>
+          <span class="caption">{{ caption() }}</span>
         </header>
         <div class="split" #splitWrap [style.grid-template-columns]="splitTemplate()">
           @if (mode() === 'tree') {
@@ -211,10 +245,12 @@ export class AstNodeComponent {
                 <loco-ast-node [node]="root" />
               }
             </div>
-          } @else {
+          } @else if (mode() === 'calls') {
             <div class="ast-scroll">
               <loco-call-graph [ast]="stateReadyRoot()" [languageId]="stateReadyLangId()" />
             </div>
+          } @else {
+            <loco-usages-panel [path]="stateReadyPath()" [languageId]="stateReadyLangId()" />
           }
           <div
             class="divider"
@@ -439,6 +475,9 @@ export class AstViewComponent {
         text,
         tokens: tokens ?? [],
       });
+      // A cross-file jump parked its target range while this file was loading.
+      const pending = this.selection.takePending(path);
+      if (pending) this.selection.setRange(pending);
     } catch (e) {
       this.state.set({
         kind: 'error',
@@ -461,11 +500,25 @@ export class AstViewComponent {
     return s.kind === 'ready' ? s.languageId : null;
   }
 
-  readonly mode = signal<'tree' | 'calls'>('tree');
+  readonly mode = signal<'tree' | 'calls' | 'usages'>('tree');
+
+  readonly caption = computed(() => {
+    switch (this.mode()) {
+      case 'tree':
+        return 'Click an AST node to jump to source.';
+      case 'calls':
+        return 'Click a function to jump to source.';
+      default:
+        return 'Click a usage to open that file at the line.';
+    }
+  });
 
   callsSupported(): boolean {
-    const id = this.stateReadyLangId();
-    return isCallGraphSupported(id);
+    return isCallGraphSupported(this.stateReadyLangId());
+  }
+
+  usagesSupported(): boolean {
+    return isSymbolIndexSupported(this.stateReadyLangId());
   }
 
   stateLoadingPath(): string {

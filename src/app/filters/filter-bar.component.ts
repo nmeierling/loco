@@ -34,7 +34,9 @@ interface MetricOption {
         (ngModelChange)="updatePath($event)"
       />
       @if (filters().path) {
-        <button class="clear" type="button" (click)="updatePath('')" title="Clear path filter">×</button>
+        <button class="clear" type="button" (click)="updatePath('')" title="Clear path filter">
+          ×
+        </button>
       }
 
       <div class="group">
@@ -49,6 +51,9 @@ interface MetricOption {
             (click)="setMetric(m.id)"
           >
             {{ m.label }}
+            @if (m.id === 'churn' && churnPending()) {
+              <span class="dot" aria-label="computing"></span>
+            }
           </button>
         }
       </div>
@@ -168,6 +173,25 @@ interface MetricOption {
         cursor: not-allowed;
         background: transparent;
       }
+      .dot {
+        display: inline-block;
+        width: 5px;
+        height: 5px;
+        margin-left: 5px;
+        border-radius: 50%;
+        background: currentColor;
+        vertical-align: middle;
+        animation: pulse 1.1s ease-in-out infinite;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 0.25;
+        }
+        50% {
+          opacity: 1;
+        }
+      }
       .spacer {
         flex: 1;
       }
@@ -194,14 +218,26 @@ export class FilterBarComponent {
   ];
 
   readonly hasChurnData = this.store.hasChurnData;
+  readonly churnPending = this.store.churnPending;
 
   isMetricDisabled(id: MetricKind): boolean {
-    if (id === 'churn') return !this.hasChurnData();
+    // Selectable as soon as we know a .git/ is there — the viz shows its own
+    // progress state until the history walk lands.
+    if (id === 'churn') return !this.store.churnOffered();
     return false;
   }
 
   metricTitle(id: MetricKind): string {
-    if (id === 'churn' && !this.hasChurnData()) {
+    if (id !== 'churn') return '';
+    const c = this.store.churn();
+    if (c.status === 'running') {
+      return c.total > 0
+        ? `Walking git history — ${c.done}/${c.total} commits`
+        : 'Walking git history…';
+    }
+    if (c.status === 'pending') return 'Walking git history…';
+    if (c.status === 'error') return `Churn unavailable: ${c.message}`;
+    if (!this.hasChurnData()) {
       return (
         'No git churn data for this folder. To enable, drop a folder that contains a ' +
         '.git/ directory. Works in Chromium-based browsers (Chrome, Edge, Brave). ' +

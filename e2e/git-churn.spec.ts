@@ -13,8 +13,11 @@ import { SRC_DIR } from './fixtures';
  *   commit 4: extend foo.ts again
  *
  * Expected churn: foo.ts = 3, bar.ts = 1.
+ *
+ * `extraCommits` appends further one-line commits to foo.ts — used to make the
+ * history walk slow enough to observe its loading state.
  */
-function buildChurnFixture(): string {
+function buildChurnFixture(extraCommits = 0): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'loco-churn-'));
   const env = {
     ...process.env,
@@ -48,11 +51,19 @@ function buildChurnFixture(): string {
   run('git add foo.ts');
   run('git commit -q -m "more foo"');
 
+  for (let i = 0; i < extraCommits; i++) {
+    fs.appendFileSync(path.join(dir, 'foo.ts'), `export const e${i} = ${i};\n`);
+    run('git add foo.ts');
+    run(`git commit -q -m "bulk ${i}"`);
+  }
+
   return dir;
 }
 
 test.describe('Git churn — local .git directory', () => {
-  test('Churn chip is visible but disabled when the dropped folder has no .git/', async ({ page }) => {
+  test('Churn chip is visible but disabled when the dropped folder has no .git/', async ({
+    page,
+  }) => {
     // Load the loco src/ folder — no .git/ inside.
     await page.goto('/');
     await page.evaluate(() => localStorage.clear());
@@ -88,10 +99,18 @@ test.describe('Git churn — local .git directory', () => {
     // The Churn chip should now be visible (it stays hidden when no .git/ is present).
     const churnChip = page.locator('loco-filter-bar .chip', { hasText: 'Churn' });
     await expect(churnChip).toBeVisible();
+    await expect(churnChip).toBeEnabled();
 
-    // Hover a tile and confirm Churn is shown in the tooltip.
-    await page.locator('loco-treemap svg rect').first().hover();
-    await expect(page.locator('loco-treemap .tip')).toContainText('Churn');
+    // Hover a tile and confirm Churn is shown in the tooltip once the walk lands.
+    await expect
+      .poll(
+        async () => {
+          await page.locator('loco-treemap svg rect').first().hover();
+          return (await page.locator('loco-treemap .tip').textContent()) ?? '';
+        },
+        { timeout: 30_000 },
+      )
+      .toContain('Churn');
 
     // Switch to Churn metric — both source files should have tiles with width>0.
     await churnChip.click();
@@ -102,6 +121,38 @@ test.describe('Git churn — local .git directory', () => {
     expect(tiles.filter((w) => w > 0).length).toBeGreaterThanOrEqual(2);
 
     // Cleanup
+    fs.rmSync(repo, { recursive: true, force: true });
+  });
+
+  test('history walk runs in the background; the churn viz shows its own loading state', async ({
+    page,
+  }) => {
+    // Enough commits that the walk is still running when the treemap first paints.
+    const repo = buildChurnFixture(160);
+
+    await page.goto('/');
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await page.waitForSelector('loco-drop-zone');
+
+    await page.locator('loco-drop-zone input[type="file"]').setInputFiles(repo);
+
+    // The tree is usable before churn finishes — the modal spinner is already gone.
+    await page.waitForSelector('loco-treemap svg', { timeout: 30_000 });
+    await page.waitForSelector('loco-spinner .overlay', { state: 'hidden', timeout: 60_000 });
+
+    // Churn is selectable while pending, and the viz explains itself instead of
+    // rendering an empty canvas.
+    const churnChip = page.locator('loco-filter-bar .chip', { hasText: 'Churn' });
+    await expect(churnChip).toBeEnabled();
+    await churnChip.click();
+    await expect(page.locator('loco-treemap .empty-title')).toHaveText('Walking git history…');
+    await expect(page.locator('footer.status')).toContainText('Walking git history');
+
+    // When the walk lands, the same view fills in without another reload.
+    await expect(page.locator('loco-treemap svg rect').first()).toBeVisible({ timeout: 60_000 });
+    await expect(page.locator('loco-treemap .empty-title')).toHaveCount(0);
+
     fs.rmSync(repo, { recursive: true, force: true });
   });
 });

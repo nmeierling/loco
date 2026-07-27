@@ -1,6 +1,6 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { DirNode, TreeNode, isDir, isFile } from '../models/tree';
-import { AnalysisPhase } from '../models/analysis';
+import { AnalysisPhase, ChurnState } from '../models/analysis';
 import { DEFAULT_FILTERS, Filters } from '../models/filters';
 import { IgnoreService } from '../services/ignore.service';
 
@@ -11,6 +11,13 @@ export class AnalysisStore {
   readonly root = signal<DirNode | null>(null);
   readonly rootName = signal<string>('');
   readonly status = signal<AnalysisPhase>({ phase: 'idle' });
+  readonly churn = signal<ChurnState>({ status: 'unavailable' });
+  /**
+   * Bumped once per loaded project. Background refinements (churn) replace the root
+   * node without touching this, so vizzes that cache expensive derived data — the
+   * module graph, the dep matrix — can key off it instead of the root's identity.
+   */
+  readonly projectId = signal(0);
   readonly filters = signal<Filters>(DEFAULT_FILTERS);
   readonly selectedPath = signal<string | null>(null);
   /** Path → File for files that survived ignore filters. Lets per-file views (AST) re-read text on demand. */
@@ -68,10 +75,41 @@ export class AnalysisStore {
     return found;
   });
 
+  /** True while git history is still being walked — the churn column has no values yet. */
+  readonly churnPending = computed<boolean>(() => {
+    const s = this.churn().status;
+    return s === 'pending' || s === 'running';
+  });
+
+  /** The churn metric is offerable: either it has data or it is on its way. */
+  readonly churnOffered = computed<boolean>(() => this.churnPending() || this.hasChurnData());
+
   setRoot(root: DirNode, rootName: string, blobs: ReadonlyMap<string, File>): void {
     this.root.set(root);
     this.rootName.set(rootName);
     this.fileBlobs.set(blobs);
+    this.projectId.update((n) => n + 1);
+  }
+
+  /**
+   * Folds churn counts into the already-rendered tree. Rebuilds the nodes it touches
+   * so dependent computeds re-run; `projectId` deliberately stays put.
+   */
+  applyChurn(byPath: ReadonlyMap<string, number>): number {
+    const root = this.root();
+    if (!root) return 0;
+    let matched = 0;
+    const rewrite = (n: TreeNode): TreeNode => {
+      if (isFile(n)) {
+        const c = byPath.get(n.path);
+        if (c === undefined) return n;
+        matched++;
+        return { ...n, metrics: { ...n.metrics, churn: c } };
+      }
+      return { ...n, children: n.children.map(rewrite) };
+    };
+    this.root.set(rewrite(root) as DirNode);
+    return matched;
   }
 
   updateFilters(patch: Partial<Filters>): void {
@@ -86,9 +124,11 @@ export class AnalysisStore {
     this.root.set(null);
     this.rootName.set('');
     this.status.set({ phase: 'idle' });
+    this.churn.set({ status: 'unavailable' });
     this.filters.set(DEFAULT_FILTERS);
     this.selectedPath.set(null);
     this.fileBlobs.set(new Map());
+    this.projectId.update((n) => n + 1);
   }
 }
 

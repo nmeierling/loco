@@ -419,8 +419,10 @@ export class ModuleGraphComponent implements AfterViewInit {
 
   constructor() {
     effect(() => {
-      // React when project root changes — invalidate graph
-      this.store.root();
+      // React when a new project is loaded — invalidate graph. Keyed on projectId so
+      // the background churn update, which replaces the root node, doesn't restart
+      // the layout mid-simulation.
+      this.store.projectId();
       this.service.reset();
       this.fullGraph = null;
       this.nodes.set([]);

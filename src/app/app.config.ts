@@ -13,6 +13,7 @@ import { TreemapComponent } from './viz/treemap/treemap.component';
 import { ModuleGraphComponent } from './viz/module-graph/module-graph.component';
 import { SunburstComponent } from './viz/sunburst/sunburst.component';
 import { DependencyMatrixComponent } from './viz/matrix/matrix.component';
+import { MetricListComponent } from './viz/list/metric-list.component';
 
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -22,12 +23,21 @@ export const appConfig: ApplicationConfig = {
       const cs = inject(ComplexityService);
       cs.setProvider(new WorkerTreeSitterProvider('/grammars'));
 
+      // Order here is the chip order. The list reads as the plainest view of the data,
+      // so it leads; the treemap is still what opens by default.
       const registry = inject(VizRegistry);
+      registry.register({
+        id: 'list',
+        label: 'List',
+        description: 'Sortable, filterable table of every file and its metrics.',
+        component: MetricListComponent,
+      });
       registry.register({
         id: 'treemap',
         label: 'Treemap',
         description: 'Nested rectangles sized by metric, colored by complexity.',
         component: TreemapComponent,
+        isDefault: true,
       });
       registry.register({
         id: 'sunburst',
@@ -44,7 +54,7 @@ export const appConfig: ApplicationConfig = {
       registry.register({
         id: 'matrix',
         label: 'Dep matrix',
-        description: 'Adjacency matrix of file-to-file imports.',
+        description: 'Folder-level import dependency matrix, drillable down to files.',
         component: DependencyMatrixComponent,
       });
     }),

@@ -9,16 +9,16 @@ test.describe('Path filter — sidebar funnel + viz-wide application', () => {
     await expandFolder(page, 'core');
 
     // The funnel button is hidden until the row is hovered; force-click to bypass that.
-    const dirRow = page
-      .locator('loco-directory-tree .row.dir', { hasText: 'services' })
-      .first();
+    const dirRow = page.locator('loco-directory-tree .row.dir', { hasText: 'services' }).first();
     await dirRow.locator('.filter-btn').click({ force: true });
 
     const pathInput = page.locator('loco-filter-bar input.search.path');
     await expect(pathInput).toHaveValue(/services/);
   });
 
-  test('path filter shrinks treemap tile count (still wider than tall after re-layout)', async ({ page }) => {
+  test('path filter shrinks treemap tile count (still wider than tall after re-layout)', async ({
+    page,
+  }) => {
     await loadLocoSrc(page);
 
     const initial = await page.locator('loco-treemap svg rect').count();
@@ -43,7 +43,9 @@ test.describe('Path filter — sidebar funnel + viz-wide application', () => {
 
     const before = await page.locator('loco-module-graph svg circle').count();
     await page.locator('loco-filter-bar input.search.path').fill('app/core/services');
-    await expect.poll(() => page.locator('loco-module-graph svg circle').count()).toBeLessThan(before);
+    await expect
+      .poll(() => page.locator('loco-module-graph svg circle').count())
+      .toBeLessThan(before);
     const after = await page.locator('loco-module-graph svg circle').count();
     expect(after).toBeGreaterThan(0);
   });
@@ -53,9 +55,16 @@ test.describe('Path filter — sidebar funnel + viz-wide application', () => {
     await selectViz(page, 'Dep matrix');
     await page.waitForSelector('loco-dependency-matrix svg rect');
 
-    const before = await page.locator('loco-dependency-matrix svg rect').count();
     await page.locator('loco-filter-bar input.search.path').fill('app/core/services');
-    await expect.poll(() => page.locator('loco-dependency-matrix svg rect').count()).toBeLessThan(before);
+
+    // Folder mode splits the biggest bucket until the grid is worth reading, so a
+    // narrow filter drills all the way down to files. Every row must come from the
+    // filtered folder.
+    const labels = page.locator('loco-dependency-matrix svg g.row-labels text');
+    await expect.poll(() => labels.count()).toBeGreaterThan(0);
+    const texts = await labels.allTextContents();
+    expect(texts.length).toBeGreaterThan(0);
+    for (const t of texts) expect(t.trim()).toMatch(/^app\/core\/services\//);
   });
 
   test('clear button next to the path input wipes the filter', async ({ page }) => {

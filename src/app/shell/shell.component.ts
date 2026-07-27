@@ -51,7 +51,9 @@ const STORAGE_KEY = 'loco.panels.v1';
         <span class="tag">lines of code, visualized</span>
       </div>
       <nav class="nav">
-        <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">heatmap</a>
+        <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }"
+          >heatmap</a
+        >
         <a routerLink="/ast" routerLinkActive="active">ast</a>
       </nav>
       @if (store.root(); as r) {
@@ -91,7 +93,9 @@ const STORAGE_KEY = 'loco.panels.v1';
           } @else {
             <header class="panel-head">
               <span class="panel-title">Files</span>
-              <button class="collapse-btn" type="button" (click)="toggle('left')" title="Collapse">‹</button>
+              <button class="collapse-btn" type="button" (click)="toggle('left')" title="Collapse">
+                ‹
+              </button>
             </header>
             <loco-directory-tree />
             <div
@@ -113,7 +117,12 @@ const STORAGE_KEY = 'loco.panels.v1';
           [style.width.px]="right().collapsed ? collapsedWidth : right().width"
         >
           @if (right().collapsed) {
-            <button class="open-btn" type="button" (click)="toggle('right')" title="Show ignore list">
+            <button
+              class="open-btn"
+              type="button"
+              (click)="toggle('right')"
+              title="Show ignore list"
+            >
               <span class="open-icon">‹</span>
               <span class="open-label">Ignore</span>
             </button>
@@ -125,7 +134,9 @@ const STORAGE_KEY = 'loco.panels.v1';
               aria-orientation="vertical"
             ></div>
             <header class="panel-head">
-              <button class="collapse-btn" type="button" (click)="toggle('right')" title="Collapse">›</button>
+              <button class="collapse-btn" type="button" (click)="toggle('right')" title="Collapse">
+                ›
+              </button>
               <span class="panel-title">Ignore</span>
             </header>
             <loco-ignore-panel />
@@ -380,10 +391,25 @@ export class ShellComponent {
         return `Counting ${s.done}/${s.total}…`;
       case 'parsing':
         return `Parsing ${s.done}/${s.total}…`;
-      case 'churn':
-        return s.total > 0 ? `Walking history ${s.done}/${s.total}…` : 'Walking git history…';
       case 'error':
         return `Error: ${s.message}`;
+      default:
+        return this.churnLine();
+    }
+  });
+
+  /** Background churn progress lives in the status bar, not behind the modal spinner. */
+  private readonly churnLine = computed(() => {
+    const c = this.store.churn();
+    switch (c.status) {
+      case 'pending':
+        return 'Walking git history…';
+      case 'running':
+        return c.total > 0
+          ? `Walking git history ${c.done}/${c.total} commits…`
+          : 'Walking git history…';
+      case 'error':
+        return `Churn unavailable: ${c.message}`;
       default:
         return null;
     }
@@ -431,9 +457,10 @@ export class ShellComponent {
     const onMove = (e: MouseEvent) => {
       if (!this.dragging) return;
       const dx = e.clientX - this.dragging.startX;
-      const raw = this.dragging.side === 'left'
-        ? this.dragging.startWidth + dx
-        : this.dragging.startWidth - dx;
+      const raw =
+        this.dragging.side === 'left'
+          ? this.dragging.startWidth + dx
+          : this.dragging.startWidth - dx;
       const width = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, raw));
       sig.update((s) => ({ ...s, width }));
     };

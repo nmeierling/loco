@@ -16,11 +16,21 @@ import { interpolateYlOrRd } from 'd3-scale-chromatic';
 import { scaleSequential } from 'd3-scale';
 import { AnalysisStore } from '../../core/state/analysis.store';
 import { IgnoreService } from '../../core/services/ignore.service';
-import { DirNode, MetricKind, TreeNode, fileCount, isDir, isFile, metricValue } from '../../core/models/tree';
+import {
+  DirNode,
+  MetricKind,
+  TreeNode,
+  fileCount,
+  isDir,
+  isFile,
+  metricValue,
+} from '../../core/models/tree';
 
 type EmptyReason =
   | { kind: 'no-project' }
   | { kind: 'no-matches'; canClearFilters: boolean; userIgnoreCount: number }
+  | { kind: 'churn-loading'; done: number; total: number }
+  | { kind: 'churn-error'; message: string }
   | { kind: 'no-data'; metric: MetricKind };
 
 interface TileDatum {
@@ -64,6 +74,27 @@ interface TileDatum {
                 </button>
               }
             }
+            @case ('churn-loading') {
+              <p class="empty-title">Walking git history…</p>
+              <p class="empty-hint">
+                Churn is computed in the background. Tiles appear as soon as the walk finishes —
+                other metrics are usable in the meantime.
+              </p>
+              <div class="progress" role="progressbar">
+                @if (e.total > 0) {
+                  <div class="progress-fill" [style.width.%]="(e.done / e.total) * 100"></div>
+                } @else {
+                  <div class="progress-fill indeterminate"></div>
+                }
+              </div>
+              @if (e.total > 0) {
+                <p class="empty-hint">{{ e.done }} / {{ e.total }} commits</p>
+              }
+            }
+            @case ('churn-error') {
+              <p class="empty-title">Churn is unavailable.</p>
+              <p class="empty-hint">{{ e.message }}</p>
+            }
             @case ('no-data') {
               <p class="empty-title">No {{ e.metric }} values for the visible files.</p>
               <p class="empty-hint">Try switching the metric in the toolbar.</p>
@@ -86,7 +117,7 @@ interface TileDatum {
                 [attr.height]="t.height"
                 [attr.fill]="t.fill"
                 [attr.stroke]="isSelected(t) ? 'var(--accent)' : 'rgba(0,0,0,0.35)'"
-                [attr.stroke-width]="isSelected(t) ? 2 : (t.width > 4 && t.height > 4 ? 0.5 : 0)"
+                [attr.stroke-width]="isSelected(t) ? 2 : t.width > 4 && t.height > 4 ? 0.5 : 0"
               />
               @if (t.width > 60 && t.height > 18) {
                 <text
@@ -108,10 +139,16 @@ interface TileDatum {
       @if (tip(); as t) {
         <div class="tip" [style.left.px]="t.x" [style.top.px]="t.y">
           <div class="tip-path">{{ t.path }}</div>
-          <div class="tip-row">LOC <strong>{{ t.loc }}</strong></div>
-          <div class="tip-row">Complexity <strong>{{ t.complexity }}</strong></div>
+          <div class="tip-row">
+            LOC <strong>{{ t.loc }}</strong>
+          </div>
+          <div class="tip-row">
+            Complexity <strong>{{ t.complexity }}</strong>
+          </div>
           @if (t.churn !== null) {
-            <div class="tip-row">Churn <strong>{{ t.churn }}</strong></div>
+            <div class="tip-row">
+              Churn <strong>{{ t.churn }}</strong>
+            </div>
           }
         </div>
       }
@@ -183,6 +220,34 @@ interface TileDatum {
       .clear-filters:hover {
         border-color: var(--accent);
         color: var(--accent);
+      }
+      .progress {
+        width: 220px;
+        height: 3px;
+        border-radius: 2px;
+        overflow: hidden;
+        background: color-mix(in srgb, var(--accent) 15%, transparent);
+        position: relative;
+      }
+      .progress-fill {
+        height: 100%;
+        background: var(--accent);
+        transition: width 0.15s ease-out;
+      }
+      .progress-fill.indeterminate {
+        position: absolute;
+        width: 40%;
+        left: -40%;
+        border-radius: 2px;
+        animation: indet 1.1s linear infinite;
+      }
+      @keyframes indet {
+        from {
+          left: -40%;
+        }
+        to {
+          left: 100%;
+        }
       }
       .tile {
         cursor: pointer;
@@ -264,9 +329,14 @@ export class TreemapComponent implements AfterViewInit {
   readonly height = signal(0);
   readonly tiles = signal<TileDatum[]>([]);
   readonly legend = signal<{ stops: string[]; min: number; max: number } | null>(null);
-  readonly tip = signal<{ x: number; y: number; path: string; loc: number; complexity: number; churn: number | null } | null>(
-    null,
-  );
+  readonly tip = signal<{
+    x: number;
+    y: number;
+    path: string;
+    loc: number;
+    complexity: number;
+    churn: number | null;
+  } | null>(null);
 
   readonly emptyReason = computed<EmptyReason | null>(() => {
     if (this.tiles().length > 0) return null;
@@ -286,7 +356,14 @@ export class TreemapComponent implements AfterViewInit {
     // We have visible files but the metric value sum is 0 (e.g. churn with no
     // churn data, or all files at LOC=0). The chip disabling already prevents
     // most of these, but it's still possible for narrow filtered subsets.
-    return { kind: 'no-data', metric: this.store.filters().metric };
+    const metric = this.store.filters().metric;
+    if (metric === 'churn') {
+      const c = this.store.churn();
+      if (c.status === 'pending') return { kind: 'churn-loading', done: 0, total: 0 };
+      if (c.status === 'running') return { kind: 'churn-loading', done: c.done, total: c.total };
+      if (c.status === 'error') return { kind: 'churn-error', message: c.message };
+    }
+    return { kind: 'no-data', metric };
   });
 
   clearFilters(): void {

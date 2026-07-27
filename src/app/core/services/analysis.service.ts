@@ -63,56 +63,65 @@ export class AnalysisService {
       await this.refineComplexity(inputs, fileNodes);
     }
 
-    this.logGitDetection(allFilesMap);
-    if (this.churn.hasGitDir(allFilesMap)) {
-      await this.refineChurn(allFilesMap, fileNodes);
-    }
-
     const blobs = new Map<string, File>();
     for (const input of inputs) blobs.set(input.path, input.file);
+
+    this.logGitDetection(allFilesMap);
+    const hasGit = this.churn.hasGitDir(allFilesMap);
+    this.store.churn.set(hasGit ? { status: 'pending' } : { status: 'unavailable' });
 
     const root = buildTree(load.rootName, fileNodes);
     this.store.setRoot(root, load.rootName, blobs);
     this.store.status.set({ phase: 'ready' });
+
+    // Walking history is the slowest part of the analysis and nothing on screen
+    // depends on it, so it runs after the tree is up and folds its results in later.
+    if (hasGit) {
+      const forProject = this.store.projectId();
+      void this.refineChurn(allFilesMap, forProject);
+    }
   }
 
   private async refineChurn(
     allFiles: ReadonlyMap<string, File>,
-    fileNodes: FileNode[],
+    forProject: number,
   ): Promise<void> {
-    this.store.status.set({ phase: 'churn', done: 0, total: 0 });
+    /** The user may swap folders mid-walk; results from the old project are dropped. */
+    const stale = (): boolean => this.store.projectId() !== forProject;
+
+    this.store.churn.set({ status: 'running', done: 0, total: 0 });
     try {
       console.info('[loco] churn: walking git history…');
       const result = await this.churn.churnByPath(allFiles, (p) => {
-        this.store.status.set({ phase: 'churn', done: p.done, total: p.total });
+        if (!stale()) this.store.churn.set({ status: 'running', done: p.done, total: p.total });
       });
+      if (stale()) return;
       if (!result) {
         console.warn('[loco] churn: service returned no result (no .git/HEAD?)');
+        this.store.churn.set({ status: 'error', message: 'No readable git history.' });
         return;
       }
+      const matched = this.store.applyChurn(result.countByPath);
+      this.store.churn.set({
+        status: 'ready',
+        filesWithChurn: matched,
+        commitsScanned: result.commitsScanned,
+      });
       console.info(
-        '[loco] churn: scanned %d commits, %d files have churn data',
+        '[loco] churn: scanned %d commits, %d files matched a git path; sample git paths: %o',
         result.commitsScanned,
-        result.countByPath.size,
-      );
-      const byPath = result.countByPath;
-      let matched = 0;
-      for (const node of fileNodes) {
-        const c = byPath.get(node.path);
-        if (c !== undefined) {
-          node.metrics = { ...node.metrics, churn: c };
-          matched++;
-        }
-      }
-      console.info(
-        '[loco] churn: %d of %d tree files matched a git path; sample git paths: %o',
         matched,
-        fileNodes.length,
-        [...byPath.keys()].slice(0, 5),
+        [...result.countByPath.keys()].slice(0, 5),
       );
     } catch (e) {
       // Don't fail the whole analysis if git parsing breaks — just leave churn null.
       console.warn('[loco] git churn computation failed', e);
+      if (!stale()) {
+        this.store.churn.set({
+          status: 'error',
+          message: e instanceof Error ? e.message : 'Git history walk failed.',
+        });
+      }
     }
   }
 
@@ -190,9 +199,7 @@ export class AnalysisService {
     }
   }
 
-  private async collectGitignores(
-    files: { path: string; file: File }[],
-  ): Promise<string[]> {
+  private async collectGitignores(files: { path: string; file: File }[]): Promise<string[]> {
     const patterns: string[] = [];
     const gitignores = files.filter((f) => f.path.endsWith('.gitignore'));
     for (const gi of gitignores) {
