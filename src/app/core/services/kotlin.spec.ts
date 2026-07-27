@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { extractImports, extractPackage, extractTopLevelDeclarations } from './imports';
-import { resolveJvm, JvmResolveContext } from './module-resolve';
-import { buildJvmContext } from './module-graph.service';
+import { buildJvmContext, resolveJvm, JvmResolveContext } from './module-resolve';
 import type { AstNode } from './complexity.service';
 
 function n(type: string, preview: string, children: AstNode[] = []): AstNode {

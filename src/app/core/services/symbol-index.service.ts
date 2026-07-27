@@ -3,7 +3,8 @@ import { AnalysisStore } from '../state/analysis.store';
 import { ComplexityService } from './complexity.service';
 import { detectLanguage } from '../languages';
 import { walk } from '../models/tree';
-import { resolveSpecifier } from './module-resolve';
+import { buildJvmContext, resolveJvm, resolveSpecifier } from './module-resolve';
+import { extractPackage } from './imports';
 import {
   FileSymbol,
   ImportBinding,
@@ -14,6 +15,9 @@ import {
   extractRawRefs,
   isSymbolIndexSupported,
 } from './symbols';
+
+/** Languages whose imports are package-qualified and resolve through {@link resolveJvm}. */
+const JVM_LANGS = new Set(['kt', 'kts', 'java']);
 
 export interface SymbolDef {
   /** `path#Name` for top-level symbols, `path#Owner.member` for members. */
@@ -70,13 +74,16 @@ export interface IndexProgress {
   total: number;
 }
 
-interface FileScan {
+/** One file's raw extraction, before cross-file resolution. Exported for unit testing. */
+export interface FileScan {
   path: string;
   langId: string;
   lines: string[];
   symbols: FileSymbol[];
   bindings: ImportBinding[];
   refs: RawRef[];
+  /** Package declaration for JVM files (null elsewhere), used to build the resolve context. */
+  pkg: string | null;
 }
 
 const EMPTY: SymbolIndex = {
@@ -234,6 +241,7 @@ export class SymbolIndexService {
               symbols,
               bindings: extractImportBindings(ast, t.langId),
               refs: extractRawRefs(ast, t.langId, symbols),
+              pkg: JVM_LANGS.has(t.langId) ? extractPackage(ast, t.langId) : null,
             });
           }
         } catch {
@@ -276,7 +284,8 @@ function defId(path: string, owner: string | null, name: string): string {
   return owner ? `${path}#${owner}.${name}` : `${path}#${name}`;
 }
 
-function resolve(scans: readonly FileScan[], allFiles: ReadonlySet<string>): SymbolIndex {
+/** Cross-file resolution of raw scans into the queryable index. Exported for unit testing. */
+export function resolve(scans: readonly FileScan[], allFiles: ReadonlySet<string>): SymbolIndex {
   const defsById = new Map<string, SymbolDef>();
   const defsByPath = new Map<string, SymbolDef[]>();
 
@@ -324,6 +333,21 @@ function resolve(scans: readonly FileScan[], allFiles: ReadonlySet<string>): Sym
     membersOf.set(path, members);
   }
 
+  // JVM imports (Kotlin today) are package-qualified rather than path-relative, so they
+  // resolve through a fully-qualified-name index built from every scanned file's package
+  // and top-level declarations instead of through {@link resolveSpecifier}.
+  const packageByPath = new Map<string, string>();
+  const declsByPath = new Map<string, string[]>();
+  for (const scan of scans) {
+    if (!JVM_LANGS.has(scan.langId)) continue;
+    packageByPath.set(scan.path, scan.pkg ?? '');
+    declsByPath.set(
+      scan.path,
+      scan.symbols.filter((s) => s.owner === null).map((s) => s.name),
+    );
+  }
+  const jvmCtx = buildJvmContext(packageByPath, declsByPath);
+
   const refsByDef = new Map<string, SymbolRef[]>();
   const refsByPath = new Map<string, SymbolRef[]>();
 
@@ -357,7 +381,9 @@ function resolve(scans: readonly FileScan[], allFiles: ReadonlySet<string>): Sym
     // local name → the file it was imported from, for namespace/default bindings
     const importedOwners: string[] = [];
     for (const b of scan.bindings) {
-      const target = resolveSpecifier(b.specifier, scan.path, scan.langId, allFiles as Set<string>);
+      const target = JVM_LANGS.has(scan.langId)
+        ? resolveJvm(b.specifier, jvmCtx)
+        : resolveSpecifier(b.specifier, scan.path, scan.langId, allFiles as Set<string>);
       if (!target) continue;
       const tops = topLevelOf.get(target);
       if (!tops) continue;
@@ -397,7 +423,27 @@ function resolve(scans: readonly FileScan[], allFiles: ReadonlySet<string>): Sym
       addMembers(importedMembers, membersOf.get(path!)?.get(owner!));
     }
 
+    const isJvmScan = JVM_LANGS.has(scan.langId);
+    // A member declared on the class an unqualified call sits in. Java and Kotlin call
+    // sibling methods without a `this.` receiver (`create()`), so a bare call resolves
+    // against the enclosing class before giving up — scoped to that class, and only when
+    // the name is unique there, to stay consistent with the no-guessing member rule.
+    const enclosingClassMember = (
+      enclosingId: string | null,
+      name: string,
+    ): SymbolDef | undefined => {
+      if (!enclosingId) return undefined;
+      const encl = defsById.get(enclosingId);
+      if (!encl) return undefined;
+      const className = encl.owner ?? encl.name;
+      const matches = (membersOf.get(scan.path)?.get(className) ?? []).filter(
+        (d) => d.name === name,
+      );
+      return matches.length === 1 ? matches[0] : undefined;
+    };
+
     for (const raw of scan.refs) {
+      const enclosingId = raw.shape === 'import' ? null : enclosingOf(raw.row, raw.col);
       let def: SymbolDef | undefined;
       if (raw.shape === 'member') {
         const first = raw.viaThis ? localMembers : importedMembers;
@@ -405,6 +451,7 @@ function resolve(scans: readonly FileScan[], allFiles: ReadonlySet<string>): Sym
         def = only(first.get(raw.name)) ?? only(second.get(raw.name));
       } else {
         def = imported.get(raw.name) ?? localTops.get(raw.name);
+        if (!def && raw.call && isJvmScan) def = enclosingClassMember(enclosingId, raw.name);
       }
       if (!def) continue;
       record({
@@ -416,7 +463,7 @@ function resolve(scans: readonly FileScan[], allFiles: ReadonlySet<string>): Sym
         endCol: raw.endCol,
         line: (scan.lines[raw.row] ?? '').trim().slice(0, 160),
         kind: raw.shape === 'import' ? 'import' : raw.call ? 'call' : 'read',
-        enclosingId: raw.shape === 'import' ? null : enclosingOf(raw.row, raw.col),
+        enclosingId,
       });
     }
   }

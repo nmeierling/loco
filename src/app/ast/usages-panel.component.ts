@@ -49,7 +49,9 @@ const MAX_REFS = 300;
   template: `
     <div class="panel">
       @if (!supported()) {
-        <div class="note">Usages are indexed for TypeScript, TSX, JavaScript and JSX files.</div>
+        <div class="note">
+          Usages are indexed for TypeScript, TSX, JavaScript, JSX, Kotlin and Java files.
+        </div>
       } @else if (progress(); as p) {
         <div class="note">
           Indexing symbols across the repo…

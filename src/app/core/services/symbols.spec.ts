@@ -33,12 +33,12 @@ function file(children: AstNode[]): AstNode {
 }
 
 describe('isSymbolIndexSupported', () => {
-  it('covers the JS/TS family only', () => {
-    for (const id of ['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs']) {
+  it('covers the JS/TS family, Kotlin and Java', () => {
+    for (const id of ['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'kt', 'kts', 'java']) {
       expect(isSymbolIndexSupported(id)).toBe(true);
     }
     expect(isSymbolIndexSupported('py')).toBe(false);
-    expect(isSymbolIndexSupported('java')).toBe(false);
+    expect(isSymbolIndexSupported('scala')).toBe(false);
     expect(isSymbolIndexSupported(null)).toBe(false);
   });
 });

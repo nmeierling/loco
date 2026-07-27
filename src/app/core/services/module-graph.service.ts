@@ -4,7 +4,7 @@ import { ComplexityService } from './complexity.service';
 import { detectLanguage } from '../languages';
 import { walk } from '../models/tree';
 import { extractImports, extractPackage, extractTopLevelDeclarations } from './imports';
-import { JvmResolveContext, resolveJvm, resolveSpecifier } from './module-resolve';
+import { JvmResolveContext, buildJvmContext, resolveJvm, resolveSpecifier } from './module-resolve';
 
 const JVM_LANGS = new Set(['kt', 'kts', 'java']);
 
@@ -301,43 +301,3 @@ export function findCycles(paths: readonly string[], edges: readonly GraphEdge[]
   return cycles.sort((a, b) => b.length - a.length || (a[0] ?? '').localeCompare(b[0] ?? ''));
 }
 
-/**
- * Builds the indices that {@link resolveJvm} needs: one mapping fully-qualified
- * class/object/function names to their file paths, and one mapping package names
- * to the list of files declaring members in that package.
- *
- * Both the explicit declarations (from `extractTopLevelDeclarations`) and the file
- * stem are used as candidate names — the JVM convention is `Foo.kt`/`Foo.java`
- * declares `Foo`, but multi-declaration files need the explicit list too.
- */
-export function buildJvmContext(
-  packageByPath: ReadonlyMap<string, string>,
-  declsByPath: ReadonlyMap<string, readonly string[]>,
-): JvmResolveContext {
-  const pkgIndex = new Map<string, string>();
-  const pkgFiles = new Map<string, string[]>();
-
-  for (const [path, pkg] of packageByPath) {
-    const list = pkgFiles.get(pkg) ?? [];
-    list.push(path);
-    pkgFiles.set(pkg, list);
-
-    const last = path.lastIndexOf('/');
-    const filename = last >= 0 ? path.slice(last + 1) : path;
-    const stem = filename.replace(/\.(kts?|java|scala)$/i, '');
-    if (stem) {
-      const key = pkg ? `${pkg}.${stem}` : stem;
-      if (!pkgIndex.has(key)) pkgIndex.set(key, path);
-    }
-
-    const decls = declsByPath.get(path);
-    if (decls) {
-      for (const d of decls) {
-        const key = pkg ? `${pkg}.${d}` : d;
-        if (!pkgIndex.has(key)) pkgIndex.set(key, path);
-      }
-    }
-  }
-
-  return { pkgIndex, pkgFiles };
-}
