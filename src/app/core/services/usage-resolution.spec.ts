@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { extractFileSymbols, extractImportBindings, extractRawRefs } from './symbols';
-import { resolve, type FileScan } from './symbol-index.service';
+import {
+  buildSymbolAdjacency,
+  resolve,
+  seedSymbols,
+  symbolSubgraph,
+  type FileScan,
+} from './symbol-index.service';
 import type { AstNode } from './complexity.service';
 
 /**
@@ -85,5 +91,37 @@ describe('resolve — unqualified same-class Java call', () => {
     const scan = scanOf('Greeter.ts', 'ts', source, ast);
     const index = resolve([scan], new Set(['Greeter.ts']));
     expect(index.refsByDef.get('Greeter.ts#Greeter.create')).toBeUndefined();
+  });
+
+  it('exposes the call as a graph edge that a focused subgraph pulls in', () => {
+    const index = resolve([scanOf('Greeter.java', 'java', source, ast)], new Set(['Greeter.java']));
+    const adj = buildSymbolAdjacency(index);
+    const greet = 'Greeter.java#Greeter.greet';
+    const create = 'Greeter.java#Greeter.create';
+
+    const greeterClass = 'Greeter.java#Greeter';
+    expect([...(adj.out.get(greet) ?? [])]).toEqual([create]);
+    expect([...(adj.in.get(create) ?? [])]).toEqual([greet]);
+    // create()'s return type is a real usage edge: create → Greeter.
+    expect([...(adj.out.get(create) ?? [])]).toEqual([greeterClass]);
+
+    // Seed = the file's symbols that take part in an edge.
+    expect(new Set(seedSymbols(index, adj, ['Greeter.java']))).toEqual(
+      new Set([greet, create, greeterClass]),
+    );
+
+    // Focusing greet pulls in its immediate neighbours (create) and the edge to it, but
+    // not the neighbour-of-a-neighbour (Greeter) until create is focused too.
+    const g = symbolSubgraph(index, adj, new Set([greet]));
+    expect(new Set(g.nodes.map((n) => n.id))).toEqual(new Set([greet, create]));
+    expect(g.edges).toEqual([{ from: greet, to: create }]);
+
+    // Focusing create as well now reaches the class node and both edges.
+    const g2 = symbolSubgraph(index, adj, new Set([greet, create]));
+    expect(new Set(g2.nodes.map((n) => n.id))).toEqual(new Set([greet, create, greeterClass]));
+    expect(g2.edges).toEqual([
+      { from: greet, to: create },
+      { from: create, to: greeterClass },
+    ]);
   });
 });

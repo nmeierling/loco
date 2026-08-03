@@ -58,6 +58,12 @@ export interface CallerEdge {
   refs: SymbolRef[];
 }
 
+/** A slice of the symbol call/usage graph: nodes and the caller→callee edges among them. */
+export interface SymbolGraph {
+  nodes: SymbolDef[];
+  edges: { from: string; to: string }[];
+}
+
 export interface SymbolIndex {
   defsById: ReadonlyMap<string, SymbolDef>;
   defsByPath: ReadonlyMap<string, SymbolDef[]>;
@@ -115,6 +121,11 @@ export class SymbolIndexService {
   private builtFor = -1;
   private inFlight: Promise<SymbolIndex> | null = null;
 
+  // Symbol-to-symbol adjacency (caller→callee), derived lazily from the index and
+  // memoised against the index instance that produced it.
+  private adjacencyFor: SymbolIndex | null = null;
+  private adjacency: SymbolAdjacency = { out: new Map(), in: new Map() };
+
   /** Builds once per loaded project; concurrent callers share the same run. */
   async build(): Promise<SymbolIndex> {
     const project = this.store.projectId();
@@ -159,6 +170,37 @@ export class SymbolIndexService {
     return out.sort(
       (a, b) => b.refs.length - a.refs.length || a.def.name.localeCompare(b.def.name),
     );
+  }
+
+  private ensureAdjacency(idx: SymbolIndex): SymbolAdjacency {
+    if (this.adjacencyFor !== idx) {
+      this.adjacency = buildSymbolAdjacency(idx);
+      this.adjacencyFor = idx;
+    }
+    return this.adjacency;
+  }
+
+  /**
+   * Declarations in `paths` that take part in at least one call/usage edge — the seed
+   * set for the graph. Symbols nothing reaches and that reach nothing are left out so
+   * the initial view isn't a field of disconnected dots.
+   */
+  seed(paths: Iterable<string>): string[] {
+    const idx = this._index();
+    if (!idx) return [];
+    return seedSymbols(idx, this.ensureAdjacency(idx), paths);
+  }
+
+  /**
+   * The graph to draw: the `focused` symbols, their immediate callers and callees, and
+   * every caller→callee edge among that node set. Adding a symbol to `focused` (clicking
+   * a node) pulls its neighbours in, so the graph is explored outward a step at a time
+   * rather than dumped whole.
+   */
+  subgraph(focused: ReadonlySet<string>): SymbolGraph {
+    const idx = this._index();
+    if (!idx) return { nodes: [], edges: [] };
+    return symbolSubgraph(idx, this.ensureAdjacency(idx), focused);
   }
 
   /**
@@ -282,6 +324,78 @@ export function parentFolder(path: string): string {
 
 function defId(path: string, owner: string | null, name: string): string {
   return owner ? `${path}#${owner}.${name}` : `${path}#${name}`;
+}
+
+/** Caller→callee adjacency over the symbol index, both directions. Exported for testing. */
+export interface SymbolAdjacency {
+  /** symbol → symbols it calls/uses. */
+  out: Map<string, Set<string>>;
+  /** symbol → symbols that call/use it. */
+  in: Map<string, Set<string>>;
+}
+
+/** Derives the symbol call/usage graph from an index: an edge per resolved, attributed usage. */
+export function buildSymbolAdjacency(idx: SymbolIndex): SymbolAdjacency {
+  const out = new Map<string, Set<string>>();
+  const inn = new Map<string, Set<string>>();
+  const link = (m: Map<string, Set<string>>, key: string, val: string): void => {
+    let set = m.get(key);
+    if (!set) {
+      set = new Set();
+      m.set(key, set);
+    }
+    set.add(val);
+  };
+  for (const refs of idx.refsByDef.values()) {
+    for (const r of refs) {
+      // Edge = the symbol a usage sits in → the symbol it resolves to. Self-edges
+      // (recursion, a class naming its own type) are not worth drawing.
+      if (!r.enclosingId || r.enclosingId === r.defId) continue;
+      link(out, r.enclosingId, r.defId);
+      link(inn, r.defId, r.enclosingId);
+    }
+  }
+  return { out, in: inn };
+}
+
+export function seedSymbols(
+  idx: SymbolIndex,
+  adj: SymbolAdjacency,
+  paths: Iterable<string>,
+): string[] {
+  const out: string[] = [];
+  for (const p of paths) {
+    for (const d of idx.defsByPath.get(p) ?? []) {
+      if (adj.out.get(d.id)?.size || adj.in.get(d.id)?.size) out.push(d.id);
+    }
+  }
+  return out;
+}
+
+export function symbolSubgraph(
+  idx: SymbolIndex,
+  adj: SymbolAdjacency,
+  focused: ReadonlySet<string>,
+): SymbolGraph {
+  const ids = new Set<string>();
+  for (const id of focused) {
+    if (!idx.defsById.has(id)) continue;
+    ids.add(id);
+    for (const n of adj.out.get(id) ?? []) ids.add(n);
+    for (const n of adj.in.get(id) ?? []) ids.add(n);
+  }
+  const nodes: SymbolDef[] = [];
+  for (const id of ids) {
+    const d = idx.defsById.get(id);
+    if (d) nodes.push(d);
+  }
+  const edges: { from: string; to: string }[] = [];
+  for (const from of ids) {
+    for (const to of adj.out.get(from) ?? []) {
+      if (ids.has(to)) edges.push({ from, to });
+    }
+  }
+  return { nodes, edges };
 }
 
 /** Cross-file resolution of raw scans into the queryable index. Exported for unit testing. */

@@ -16,9 +16,8 @@ import { detectLanguage } from '../core/languages';
 import { AstSelectionService } from './ast-selection.service';
 import { SourceLink, SourcePanelComponent } from './source-panel.component';
 import { SymbolIndexService } from '../core/services/symbol-index.service';
-import { CallGraphComponent } from './call-graph.component';
+import { SymbolGraphComponent } from './symbol-graph.component';
 import { UsagesPanelComponent } from './usages-panel.component';
-import { isCallGraphSupported } from '../core/services/call-graph';
 import { isSymbolIndexSupported } from '../core/services/symbols';
 
 const SPLIT_KEY = 'loco:ast-split';
@@ -158,7 +157,7 @@ export class AstNodeComponent {
     AstNodeComponent,
     RouterLink,
     SourcePanelComponent,
-    CallGraphComponent,
+    SymbolGraphComponent,
     UsagesPanelComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -213,14 +212,16 @@ export class AstNodeComponent {
             <button
               type="button"
               class="mode"
-              [class.active]="mode() === 'calls'"
-              [disabled]="!callsSupported()"
-              (click)="mode.set('calls')"
+              [class.active]="mode() === 'graph'"
+              [disabled]="!usagesSupported()"
+              (click)="mode.set('graph')"
               [title]="
-                callsSupported() ? 'Function call graph' : 'Call graph only available for TS/JS'
+                usagesSupported()
+                  ? 'Visual call/usage graph for this file or folder'
+                  : 'Graph only available for TS/TSX/JS/JSX, Kotlin and Java'
               "
             >
-              Calls
+              Graph
             </button>
             <button
               type="button"
@@ -246,10 +247,8 @@ export class AstNodeComponent {
                 <loco-ast-node [node]="root" />
               }
             </div>
-          } @else if (mode() === 'calls') {
-            <div class="ast-scroll">
-              <loco-call-graph [ast]="stateReadyRoot()" [languageId]="stateReadyLangId()" />
-            </div>
+          } @else if (mode() === 'graph') {
+            <loco-symbol-graph [path]="stateReadyPath()" [languageId]="stateReadyLangId()" />
           } @else {
             <loco-usages-panel [path]="stateReadyPath()" [languageId]="stateReadyLangId()" />
           }
@@ -514,14 +513,14 @@ export class AstViewComponent {
     return s.kind === 'ready' ? s.languageId : null;
   }
 
-  readonly mode = signal<'tree' | 'calls' | 'usages'>('tree');
+  readonly mode = signal<'tree' | 'graph' | 'usages'>('tree');
 
   readonly caption = computed(() => {
     switch (this.mode()) {
       case 'tree':
         return 'Click an AST node to jump to source.';
-      case 'calls':
-        return 'Click a function to jump to source.';
+      case 'graph':
+        return 'Click a symbol to expand its callers and callees, and open it.';
       default:
         return 'Click a usage to open that file at the line.';
     }
@@ -562,10 +561,6 @@ export class AstViewComponent {
       endRow: def.endRow,
       endCol: def.endCol,
     });
-  }
-
-  callsSupported(): boolean {
-    return isCallGraphSupported(this.stateReadyLangId());
   }
 
   usagesSupported(): boolean {
