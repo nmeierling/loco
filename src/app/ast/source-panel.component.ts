@@ -39,15 +39,15 @@ export interface SourceLink {
   template: `
     <div class="wrap" #wrap>
       <div class="code">
-        @for (segs of lineSegments(); track $index) {
+        @for (segs of lineSegments(); track $index; let i = $index) {
           <div
             class="row"
-            [attr.id]="'L' + ($index + 1)"
-            [class.highlighted]="isHighlighted($index + 1)"
-            [class.start]="isStart($index + 1)"
-            [class.end]="isEnd($index + 1)"
+            [attr.id]="'L' + (startLine() + i + 1)"
+            [class.highlighted]="isHighlighted(startLine() + i + 1)"
+            [class.start]="isStart(startLine() + i + 1)"
+            [class.end]="isEnd(startLine() + i + 1)"
           >
-            <span class="num">{{ $index + 1 }}</span
+            <span class="num">{{ startLine() + i + 1 }}</span
             ><span class="text">
               @for (seg of segs; track $index) {
                 <span
@@ -66,14 +66,16 @@ export interface SourceLink {
   styles: [
     `
       :host {
-        display: block;
+        display: flex;
+        flex-direction: column;
         height: 100%;
         min-height: 0;
         overflow: hidden;
         background: var(--input-bg);
       }
       .wrap {
-        height: 100%;
+        flex: 1;
+        min-height: 0;
         overflow: auto;
       }
       .code {
@@ -158,9 +160,11 @@ export class SourcePanelComponent implements AfterViewInit {
   private readonly lines = signal<string[]>([]);
   private readonly tokens = signal<readonly HighlightToken[]>([]);
   private readonly links = signal<readonly SourceLink[]>([]);
+  /** Absolute 0-based file line of the first rendered line — non-zero on paged previews. */
+  readonly startLine = signal(0);
   readonly range = this.selection.range;
   readonly lineSegments = computed<Segment[][]>(() =>
-    buildSegments(this.lines(), this.tokens(), this.links()),
+    buildSegments(this.lines(), this.tokens(), this.links(), this.startLine()),
   );
   /** defId → hover text, so the template can label a link without a lookup helper. */
   readonly linkTitles = computed(() => {
@@ -183,6 +187,10 @@ export class SourcePanelComponent implements AfterViewInit {
     this.links.set(value ?? []);
   }
 
+  @Input() set startLineInput(value: number | null) {
+    this.startLine.set(value ?? 0);
+  }
+
   /** Emits the declaration id the user clicked through to. */
   @Output() readonly gotoDefinition = new EventEmitter<string>();
 
@@ -200,6 +208,9 @@ export class SourcePanelComponent implements AfterViewInit {
   constructor() {
     effect(() => {
       const r = this.range();
+      // Re-run once the paged slice has re-rendered, so the target row exists to scroll to.
+      this.lines();
+      this.startLine();
       if (!r) return;
       queueMicrotask(() => this.scrollTo(r.startRow + 1));
     });
@@ -236,6 +247,7 @@ function buildSegments(
   lines: readonly string[],
   tokens: readonly HighlightToken[],
   links: readonly SourceLink[],
+  startLine: number,
 ): Segment[][] {
   const out: Segment[][] = [];
   if (lines.length === 0) return out;
@@ -243,21 +255,27 @@ function buildSegments(
     for (const line of lines) out.push([{ kind: '', text: line }]);
     return out;
   }
+  // Tokens and links carry absolute file rows; the rendered `lines` are the current page,
+  // so shift every row into the local window by `startLine`.
   const linksByLine = new Map<number, SourceLink[]>();
   for (const l of links) {
-    const list = linksByLine.get(l.row) ?? [];
+    const row = l.row - startLine;
+    if (row < 0 || row >= lines.length) continue;
+    const list = linksByLine.get(row) ?? [];
     list.push(l);
-    linksByLine.set(l.row, list);
+    linksByLine.set(row, list);
   }
   // Bucket tokens by line, slicing multi-line spans (e.g. block comments).
   const perLine: { start: number; end: number; kind: string }[][] = lines.map(() => []);
   for (const t of tokens) {
-    const startRow = Math.max(0, t.startRow);
-    const endRow = Math.min(lines.length - 1, t.endRow);
+    const localStart = t.startRow - startLine;
+    const localEnd = t.endRow - startLine;
+    const startRow = Math.max(0, localStart);
+    const endRow = Math.min(lines.length - 1, localEnd);
     for (let r = startRow; r <= endRow; r++) {
       const lineLen = lines[r].length;
-      const sc = r === t.startRow ? Math.max(0, t.startCol) : 0;
-      const ec = r === t.endRow ? Math.min(lineLen, t.endCol) : lineLen;
+      const sc = r === localStart ? Math.max(0, t.startCol) : 0;
+      const ec = r === localEnd ? Math.min(lineLen, t.endCol) : lineLen;
       if (ec > sc) perLine[r].push({ start: sc, end: ec, kind: t.kind });
     }
   }

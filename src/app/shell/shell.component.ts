@@ -70,8 +70,9 @@ const STORAGE_KEY = 'loco.panels.v1';
             type="button"
             class="tab file"
             [class.active]="tabs.activePath() === path"
-            (click)="tabs.activate(path)"
-            [title]="path"
+            [class.closing]="shiftHeld()"
+            (click)="onTabClick($event, path)"
+            [title]="shiftHeld() ? 'Click to close' : path"
           >
             <span class="tab-name">{{ basename(path) }}</span>
             <span
@@ -286,6 +287,21 @@ const STORAGE_KEY = 'loco.panels.v1';
       .tab-close:hover {
         opacity: 1;
         background: color-mix(in srgb, var(--danger) 30%, transparent);
+      }
+      /* While Shift is held, a click anywhere on a tab closes it — signal that with an
+         X cursor and a red tint. */
+      .tab.file.closing {
+        cursor:
+          url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18"><line x1="4" y1="4" x2="14" y2="14" stroke="%23e5484d" stroke-width="2.5" stroke-linecap="round"/><line x1="14" y1="4" x2="4" y2="14" stroke="%23e5484d" stroke-width="2.5" stroke-linecap="round"/></svg>')
+            9 9,
+          pointer;
+      }
+      .tab.file.closing:hover {
+        background: color-mix(in srgb, var(--danger) 22%, transparent);
+      }
+      .tab.file.closing .tab-close {
+        opacity: 1;
+        color: var(--danger);
       }
       .root {
         margin-left: auto;
@@ -505,6 +521,8 @@ export class ShellComponent {
   private readonly destroyRef = inject(DestroyRef);
   readonly errorMessage = signal<string | null>(null);
   readonly helpOpen = signal(false);
+  /** True while Shift is held — turns a tab click into "close this tab". */
+  readonly shiftHeld = signal(false);
 
   readonly collapsedWidth = COLLAPSED_WIDTH;
 
@@ -605,6 +623,18 @@ export class ShellComponent {
     const tick = setInterval(() => this.now.set(Date.now()), 60_000);
     this.destroyRef.onDestroy(() => clearInterval(tick));
 
+    // Track Shift so the tab bar can switch to "click to close" mode.
+    const onShift = (e: KeyboardEvent) => this.shiftHeld.set(e.shiftKey);
+    const clearShift = () => this.shiftHeld.set(false);
+    window.addEventListener('keydown', onShift);
+    window.addEventListener('keyup', onShift);
+    window.addEventListener('blur', clearShift);
+    this.destroyRef.onDestroy(() => {
+      window.removeEventListener('keydown', onShift);
+      window.removeEventListener('keyup', onShift);
+      window.removeEventListener('blur', clearShift);
+    });
+
     effect(() => {
       const data = { left: this.left(), right: this.right() };
       try {
@@ -692,6 +722,15 @@ export class ShellComponent {
     this.ig.clearUserPatterns();
     this.errorMessage.set(null);
     void this.session.discard();
+  }
+
+  /** Shift-click closes the tab; a plain click just activates it. */
+  onTabClick(ev: MouseEvent, path: string): void {
+    if (ev.shiftKey) {
+      this.tabs.close(path);
+    } else {
+      this.tabs.activate(path);
+    }
   }
 
   closeTab(ev: Event, path: string): void {

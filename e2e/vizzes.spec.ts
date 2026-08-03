@@ -1,5 +1,5 @@
 import { Page, expect, test } from '@playwright/test';
-import { loadFixture, selectViz } from './fixtures';
+import { loadFixture, selectViz, showAstTree } from './fixtures';
 
 /** Blocks until the force layout stops moving nodes around. */
 async function settleGraph(page: Page): Promise<void> {
@@ -84,7 +84,7 @@ test.describe('Alternative vizzes (sunburst, module graph, dep matrix)', () => {
     // pick one that is actually on screen rather than whichever comes first in the DOM.
     await dblclickVisibleNode(page);
     await expect(page.locator('loco-ast-view')).toBeVisible();
-    await expect(page.locator('loco-ast-view loco-ast-node').first()).toBeVisible();
+    await showAstTree(page);
   });
 
   test('minimap drag clamps the viewport at the graph edge (no rescale shrink)', async ({

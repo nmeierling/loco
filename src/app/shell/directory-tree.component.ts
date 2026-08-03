@@ -2,8 +2,6 @@ import { ChangeDetectionStrategy, Component, Input, computed, inject, signal } f
 import { DecimalPipe } from '@angular/common';
 import { AnalysisStore } from '../core/state/analysis.store';
 import { TabsStore } from '../core/state/tabs.store';
-import { ComplexityService } from '../core/services/complexity.service';
-import { detectLanguage } from '../core/languages';
 import { DirNode, MetricKind, TreeNode, isDir, isFile, metricValue } from '../core/models/tree';
 
 @Component({
@@ -228,11 +226,8 @@ export class TreeNodeComponent {
       <div class="tree">
         <loco-tree-node [node]="r" [depth]="0" />
       </div>
-      @if (astModeNote()) {
-        <div class="note">{{ astModeNote() }}</div>
-      }
     } @else {
-      <div class="empty">{{ emptyMessage() }}</div>
+      <div class="empty">No tree loaded.</div>
     }
   `,
   styles: [
@@ -250,51 +245,13 @@ export class TreeNodeComponent {
         opacity: 0.5;
         padding: 12px;
       }
-      .note {
-        margin-top: 8px;
-        padding: 6px 8px;
-        font-size: 10px;
-        opacity: 0.6;
-        line-height: 1.4;
-        border-top: 1px solid var(--border);
-      }
     `,
   ],
 })
 export class DirectoryTreeComponent {
   private readonly store = inject(AnalysisStore);
-  private readonly complexity = inject(ComplexityService);
-  private readonly tabs = inject(TabsStore);
 
-  readonly astMode = computed(() => this.tabs.isAstActive());
-
-  readonly root = computed<DirNode | null>(() => {
-    const base = this.store.filteredRoot();
-    if (!base) return null;
-    if (!this.astMode()) return base;
-    const pruned = pruneToSupported(base, this.complexity);
-    return pruned && isDir(pruned) ? pruned : null;
-  });
-
-  readonly astModeNote = computed(() =>
-    this.astMode() ? 'Showing only files with AST support.' : '',
-  );
-
-  readonly emptyMessage = computed(() =>
-    this.astMode() ? 'No AST-supported files in this project.' : 'No tree loaded.',
-  );
-}
-
-function pruneToSupported(node: TreeNode, complexity: ComplexityService): TreeNode | null {
-  if (isFile(node)) {
-    const lang = detectLanguage(node.name);
-    return lang && complexity.supports(lang.id) ? node : null;
-  }
-  const kept: TreeNode[] = [];
-  for (const c of node.children) {
-    const k = pruneToSupported(c, complexity);
-    if (k) kept.push(k);
-  }
-  if (kept.length === 0) return null;
-  return { ...node, children: kept };
+  // Every file is openable now (code → AST view, anything else → text/hex preview), so the
+  // tree always shows the whole project rather than pruning to AST-supported files.
+  readonly root = this.store.filteredRoot;
 }

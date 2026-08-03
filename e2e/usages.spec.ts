@@ -122,13 +122,15 @@ test.describe('AST usages panel', () => {
     await expect(page.locator('loco-ast-view .path')).toHaveText('app/app.ts');
   });
 
-  test('the Usages tab is disabled for a language with no symbol index', async ({ page }) => {
+  test('a file with no grammar opens as an editor-only preview, no mode buttons', async ({
+    page,
+  }) => {
     await loadFixture(page);
     await openInAst(page, 'index.html');
 
-    // index.html has no grammar at all, so the AST view never reaches the ready state
-    // that renders the mode buttons.
-    await expect(page.locator('loco-ast-view .placeholder')).toBeVisible();
+    // index.html has no grammar, so there is no AST/Graph/Usages — just the editor.
+    await expect(page.locator('loco-ast-view loco-source-panel')).toBeVisible();
     await expect(page.locator('loco-ast-view .mode')).toHaveCount(0);
+    await expect(page.locator('loco-ast-view .split')).toHaveCount(0);
   });
 });

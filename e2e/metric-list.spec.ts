@@ -1,5 +1,5 @@
 import { Page, expect, test } from '@playwright/test';
-import { loadFixture, selectViz } from './fixtures';
+import { loadFixture, selectViz, showAstTree } from './fixtures';
 
 /** Numeric text of the nth cell of each rendered row (commas stripped, em-dash → null). */
 async function columnValues(page: Page, cellIndex: number): Promise<(number | null)[]> {
@@ -98,7 +98,7 @@ test.describe('Metric list viz', () => {
     await row.dblclick();
 
     await expect(page.locator('loco-ast-view')).toBeVisible();
-    await expect(page.locator('loco-ast-view loco-ast-node').first()).toBeVisible();
+    await showAstTree(page);
     expect(path).toBeTruthy();
   });
 });

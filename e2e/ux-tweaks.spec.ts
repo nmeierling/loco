@@ -38,25 +38,23 @@ test.describe('UX tweaks', () => {
     await expect(page.locator('loco-filter-bar .group .label', { hasText: 'viz' })).toBeVisible();
   });
 
-  test('an AST tab filters the sidebar to AST-supported files', async ({ page }) => {
+  test('the sidebar shows every file, even with an AST tab open', async ({ page }) => {
     await loadFixture(page);
 
-    // On the heatmap, every file extension is allowed in the tree.
+    // On the heatmap, every file extension is listed.
     await expandFolder(page, 'app');
     await expect(
       page.locator('loco-directory-tree .row.file:has(.name:has-text("app.scss"))'),
     ).toBeVisible();
 
-    // Open an AST tab — .scss has no AST parser, so the row disappears.
+    // Opening an AST tab no longer prunes the tree — non-code files stay openable
+    // (they now open as a text/hex preview).
     await openInAst(page, 'app.ts');
     await expect(
       page.locator('loco-directory-tree .row.file:has(.name:has-text("app.scss"))'),
-    ).toHaveCount(0);
-    // TS files remain visible (after expanding the dir on /ast)
+    ).toBeVisible();
     await expect(
       page.locator('loco-directory-tree .row.file:has(.name:has-text("app.ts"))'),
     ).toBeVisible();
-    // Note line at the bottom of the tree
-    await expect(page.locator('loco-directory-tree .note')).toContainText(/AST support/i);
   });
 });

@@ -1,5 +1,5 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { DirNode, TreeNode, isDir, isFile } from '../models/tree';
+import { DirNode, FileNode, TreeNode, isDir, isFile, walk } from '../models/tree';
 import { AnalysisPhase, ChurnState, RiskState } from '../models/analysis';
 import { DEFAULT_FILTERS, Filters } from '../models/filters';
 import { IgnoreService } from '../services/ignore.service';
@@ -38,6 +38,14 @@ export class AnalysisStore {
     // tailored "no matches" empty state instead of silently rendering the
     // full unfiltered tree.
     return { ...root, children: [] };
+  });
+
+  /** Path → file node, so per-file views can read a file's metrics without walking the tree. */
+  readonly nodeByPath = computed<ReadonlyMap<string, FileNode>>(() => {
+    const root = this.root();
+    const map = new Map<string, FileNode>();
+    if (root) walk(root, (n) => isFile(n) && map.set(n.path, n));
+    return map;
   });
 
   /** Set of file paths that survive name + path + user-ignore filters. Used by repo-wide vizzes. */

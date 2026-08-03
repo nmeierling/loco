@@ -44,9 +44,9 @@ test.describe('Session survives a reload', () => {
 
     await openInAst(page, 'catalog.store');
 
-    // Source text came out of the cache, so the tree and the panel both render.
-    await expect(page.locator('loco-ast-view loco-ast-node').first()).toBeVisible();
-    await page.locator('loco-ast-view .mode', { hasText: 'Usages' }).click();
+    // Source text came out of the cache, so the editor renders — and a TS file opens on
+    // the Usages tab by default, proving the symbol index rebuilt from the cached blobs.
+    await expect(page.locator('loco-source-panel .row').first()).toBeVisible();
     await expect(page.locator('loco-usages-panel .sym-head').first()).toBeVisible();
     await expect(
       page.locator('loco-usages-panel .sym-head', { hasText: 'CatalogStore' }).first(),

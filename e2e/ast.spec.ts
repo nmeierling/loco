@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { expandFolder, loadFixture } from './fixtures';
+import { expandFolder, loadFixture, showAstTree } from './fixtures';
 
 test.describe('AST view + source panel + call graph', () => {
   test('double-click a sidebar file opens the AST view with a source pane', async ({ page }) => {
@@ -13,7 +13,7 @@ test.describe('AST view + source panel + call graph', () => {
       .dblclick();
 
     await expect(page.locator('loco-ast-view')).toBeVisible();
-    await expect(page.locator('loco-ast-view loco-ast-node').first()).toBeVisible();
+    await showAstTree(page);
 
     // Source panel renders lines
     await expect(page.locator('loco-source-panel .row').first()).toBeVisible();
@@ -30,6 +30,7 @@ test.describe('AST view + source panel + call graph', () => {
       .first()
       .dblclick();
     await expect(page.locator('loco-ast-view')).toBeVisible();
+    await showAstTree(page);
 
     const classNode = page
       .locator('loco-ast-view loco-ast-node .row', { hasText: 'class_declaration' })

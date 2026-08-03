@@ -78,3 +78,12 @@ export async function openInAst(page: Page, nameFragment: string): Promise<void>
 export async function showHeatmap(page: Page): Promise<void> {
   await page.locator('header.head .tab', { hasText: 'heatmap' }).click();
 }
+
+/**
+ * Switches an open code file's right pane to the AST Tree. Symbol-indexed files now open
+ * on the Usages tab by default, so tree-focused specs opt in explicitly.
+ */
+export async function showAstTree(page: Page): Promise<void> {
+  await page.locator('loco-ast-view .mode', { hasText: 'Tree' }).click();
+  await expect(page.locator('loco-ast-view loco-ast-node').first()).toBeVisible();
+}

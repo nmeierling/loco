@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { expandFolder, loadFixture } from './fixtures';
+import { expandFolder, loadFixture, showAstTree } from './fixtures';
 
 test.describe('Empty-state, resizable AST split, syntax highlighting', () => {
   test('treemap shows a tailored "no matches" empty state + clear button restores tiles', async ({
@@ -35,7 +35,7 @@ test.describe('Empty-state, resizable AST split, syntax highlighting', () => {
       .first()
       .dblclick();
     await expect(page.locator('loco-ast-view')).toBeVisible();
-    await expect(page.locator('loco-ast-view loco-ast-node').first()).toBeVisible();
+    await showAstTree(page);
 
     const divider = page.locator('loco-ast-view .divider');
     await expect(divider).toBeVisible();

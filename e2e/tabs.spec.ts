@@ -69,6 +69,25 @@ test.describe('AST tabs', () => {
     await expect(page.locator('loco-ast-view .path')).toHaveText(/catalog\.service\.ts$/);
   });
 
+  test('shift-clicking a tab closes it', async ({ page }) => {
+    await openTreeFile(page, 'catalog.service.ts');
+    await openTreeFile(page, 'catalog.store.ts');
+    await expect(page.locator('header.head .tab.file')).toHaveCount(2);
+
+    // Plain click just activates; shift-click closes.
+    await page
+      .locator('header.head .tab.file', { hasText: 'catalog.service.ts' })
+      .click({ modifiers: ['Shift'] });
+
+    await expect(page.locator('header.head .tab.file')).toHaveCount(1);
+    await expect(
+      page.locator('header.head .tab.file', { hasText: 'catalog.service.ts' }),
+    ).toHaveCount(0);
+    await expect(
+      page.locator('header.head .tab.file', { hasText: 'catalog.store.ts' }),
+    ).toBeVisible();
+  });
+
   test('closing the last tab falls back to the heatmap', async ({ page }) => {
     await openTreeFile(page, 'catalog.service.ts');
     await page
