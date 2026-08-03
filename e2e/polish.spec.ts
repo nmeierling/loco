@@ -34,7 +34,7 @@ test.describe('Empty-state, resizable AST split, syntax highlighting', () => {
       .locator('loco-directory-tree .row.file', { hasText: 'catalog.service.ts' })
       .first()
       .dblclick();
-    await page.waitForURL(/\/ast$/);
+    await expect(page.locator('loco-ast-view')).toBeVisible();
     await expect(page.locator('loco-ast-view loco-ast-node').first()).toBeVisible();
 
     const divider = page.locator('loco-ast-view .divider');
@@ -78,7 +78,7 @@ test.describe('Empty-state, resizable AST split, syntax highlighting', () => {
       .locator('loco-directory-tree .row.file', { hasText: 'catalog.service.ts' })
       .first()
       .dblclick();
-    await page.waitForURL(/\/ast$/);
+    await expect(page.locator('loco-ast-view')).toBeVisible();
     await expect(page.locator('loco-source-panel .row').first()).toBeVisible();
 
     // We expect at least a handful of each token kind in any TS service file.

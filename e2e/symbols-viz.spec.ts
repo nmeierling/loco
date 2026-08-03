@@ -62,7 +62,7 @@ test.describe('Symbols viz', () => {
     await selectViz(page, 'Symbols');
     await page.locator('loco-symbols-viz .row', { hasText: 'EMPTY_PRODUCT' }).first().click();
 
-    await page.waitForURL(/\/ast$/);
+    await expect(page.locator('loco-ast-view')).toBeVisible();
     await expect(page.locator('loco-ast-view .path')).toHaveText('app/core/models/product.ts');
     await expect(page.locator('loco-source-panel .row.highlighted').first()).toBeVisible();
   });

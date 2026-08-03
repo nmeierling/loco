@@ -1,8 +1,7 @@
 import { ChangeDetectionStrategy, Component, Input, computed, inject, signal } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
-import { Router } from '@angular/router';
 import { AnalysisStore } from '../core/state/analysis.store';
-import { routeUrlSignal } from '../core/state/route-url';
+import { TabsStore } from '../core/state/tabs.store';
 import { ComplexityService } from '../core/services/complexity.service';
 import { detectLanguage } from '../core/languages';
 import { DirNode, MetricKind, TreeNode, isDir, isFile, metricValue } from '../core/models/tree';
@@ -142,7 +141,7 @@ import { DirNode, MetricKind, TreeNode, isDir, isFile, metricValue } from '../co
 })
 export class TreeNodeComponent {
   private readonly store = inject(AnalysisStore);
-  private readonly router = inject(Router);
+  private readonly tabs = inject(TabsStore);
 
   @Input({ required: true }) node!: TreeNode;
   @Input() depth = 0;
@@ -210,10 +209,7 @@ export class TreeNodeComponent {
   }
 
   openAst(): void {
-    if (isFile(this.node)) {
-      this.store.selectPath(this.node.path);
-      this.router.navigate(['/ast']);
-    }
+    if (isFile(this.node)) this.tabs.openFile(this.node.path);
   }
 
   setPathFilter(ev: Event, path: string): void {
@@ -268,9 +264,9 @@ export class TreeNodeComponent {
 export class DirectoryTreeComponent {
   private readonly store = inject(AnalysisStore);
   private readonly complexity = inject(ComplexityService);
-  private readonly url = routeUrlSignal();
+  private readonly tabs = inject(TabsStore);
 
-  readonly astMode = computed(() => this.url().startsWith('/ast'));
+  readonly astMode = computed(() => this.tabs.isAstActive());
 
   readonly root = computed<DirNode | null>(() => {
     const base = this.store.filteredRoot();

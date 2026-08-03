@@ -10,7 +10,7 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { Router } from '@angular/router';
+import { TabsStore } from '../../core/state/tabs.store';
 import { HierarchyRectangularNode, hierarchy, treemap, treemapSquarify } from 'd3-hierarchy';
 import { interpolateYlOrRd } from 'd3-scale-chromatic';
 import { scaleSequential } from 'd3-scale';
@@ -358,7 +358,7 @@ interface TileDatum {
 export class TreemapComponent implements AfterViewInit {
   private readonly store = inject(AnalysisStore);
   private readonly ig = inject(IgnoreService);
-  private readonly router = inject(Router);
+  private readonly tabs = inject(TabsStore);
   private readonly destroyRef = inject(DestroyRef);
 
   @ViewChild('wrap', { static: true }) wrap!: ElementRef<HTMLDivElement>;
@@ -466,10 +466,7 @@ export class TreemapComponent implements AfterViewInit {
   }
 
   onOpenAst(t: TileDatum): void {
-    if (isFile(t.node)) {
-      this.store.selectPath(t.node.path);
-      this.router.navigate(['/ast']);
-    }
+    if (isFile(t.node)) this.tabs.openFile(t.node.path);
   }
 
   isSelected(t: TileDatum): boolean {

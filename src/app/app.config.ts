@@ -4,9 +4,6 @@ import {
   provideAppInitializer,
   provideBrowserGlobalErrorListeners,
 } from '@angular/core';
-import { provideRouter } from '@angular/router';
-
-import { routes } from './app.routes';
 import { ComplexityService, WorkerTreeSitterProvider } from './core/services/complexity.service';
 import { VizRegistry } from './viz/viz-registry';
 import { TreemapComponent } from './viz/treemap/treemap.component';
@@ -19,7 +16,6 @@ import { SymbolsVizComponent } from './viz/symbols/symbols.component';
 export const appConfig: ApplicationConfig = {
   providers: [
     provideBrowserGlobalErrorListeners(),
-    provideRouter(routes),
     provideAppInitializer(() => {
       const cs = inject(ComplexityService);
       cs.setProvider(new WorkerTreeSitterProvider('/grammars'));

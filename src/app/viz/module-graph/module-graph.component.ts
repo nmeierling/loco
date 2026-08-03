@@ -10,7 +10,7 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { Router } from '@angular/router';
+import { TabsStore } from '../../core/state/tabs.store';
 import {
   Simulation,
   SimulationLinkDatum,
@@ -370,7 +370,7 @@ interface RenderLink {
 export class ModuleGraphComponent implements AfterViewInit {
   private readonly store = inject(AnalysisStore);
   private readonly service = inject(ModuleGraphService);
-  private readonly router = inject(Router);
+  private readonly tabs = inject(TabsStore);
   private readonly destroyRef = inject(DestroyRef);
 
   @ViewChild('wrap', { static: true }) wrap!: ElementRef<HTMLDivElement>;
@@ -683,8 +683,7 @@ export class ModuleGraphComponent implements AfterViewInit {
   }
 
   onDblClick(n: RenderNode): void {
-    this.store.selectPath(n.id);
-    this.router.navigate(['/ast']);
+    this.tabs.openFile(n.id);
   }
 
   onWheel(ev: WheelEvent): void {

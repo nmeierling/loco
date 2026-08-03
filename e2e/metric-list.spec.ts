@@ -97,7 +97,7 @@ test.describe('Metric list viz', () => {
     const path = await row.getAttribute('title');
     await row.dblclick();
 
-    await page.waitForURL(/\/ast$/);
+    await expect(page.locator('loco-ast-view')).toBeVisible();
     await expect(page.locator('loco-ast-view loco-ast-node').first()).toBeVisible();
     expect(path).toBeTruthy();
   });

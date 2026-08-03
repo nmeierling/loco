@@ -1,5 +1,6 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { AnalysisStore } from '../state/analysis.store';
+import { TabsStore } from '../state/tabs.store';
 import { IgnoreService } from './ignore.service';
 import {
   MAX_SESSION_BYTES,
@@ -19,6 +20,7 @@ const META_DEBOUNCE_MS = 400;
 @Injectable({ providedIn: 'root' })
 export class SessionService {
   private readonly store = inject(AnalysisStore);
+  private readonly tabs = inject(TabsStore);
   private readonly ig = inject(IgnoreService);
   private readonly db = inject(SessionStoreService);
 
@@ -51,6 +53,10 @@ export class SessionService {
       this.store.setRoot(meta.tree, meta.rootName, files);
       this.store.filters.set(meta.filters);
       this.store.selectPath(meta.selectedPath);
+      this.tabs.restoreOpen(
+        (meta.openTabs ?? []).filter((p) => files.has(p)),
+        meta.activeTab ?? null,
+      );
       // Churn cannot be recomputed after a restore — `.git/` is not cached — so a walk
       // that had not finished when the snapshot was taken stays unavailable.
       this.store.churn.set(
@@ -109,6 +115,8 @@ export class SessionService {
       void this.db.saveMeta({
         filters: this.store.filters(),
         selectedPath: this.store.selectedPath(),
+        openTabs: [...this.tabs.astTabs()],
+        activeTab: this.tabs.activePath(),
         vizId: this.vizId,
         ignorePatterns: [...this.ig.userPatterns()],
       });
@@ -150,6 +158,8 @@ export class SessionService {
       tree: root,
       filters: this.store.filters(),
       selectedPath: this.store.selectedPath(),
+      openTabs: [...this.tabs.astTabs()],
+      activeTab: this.tabs.activePath(),
       vizId: this.vizId,
       ignorePatterns: [...this.ig.userPatterns()],
       churn: this.store.churn(),

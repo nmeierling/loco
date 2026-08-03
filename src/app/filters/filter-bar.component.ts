@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/c
 import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { AnalysisStore } from '../core/state/analysis.store';
-import { routeUrlSignal } from '../core/state/route-url';
+import { TabsStore } from '../core/state/tabs.store';
 import { MetricKind, fileCount, metricValue } from '../core/models/tree';
 import { VizRegistry } from '../viz/viz-registry';
 import { RiskService } from '../core/services/risk.service';
@@ -256,8 +256,8 @@ export class FilterBarComponent {
 
   readonly vizList = this.registry.all;
   readonly selectedViz = this.registry.selectedId;
-  private readonly url = routeUrlSignal();
-  readonly showVizSwitcher = computed(() => !this.url().startsWith('/ast'));
+  private readonly tabs = inject(TabsStore);
+  readonly showVizSwitcher = computed(() => !this.tabs.isAstActive());
 
   readonly filesCount = computed(() => {
     const r = this.store.filteredRoot();

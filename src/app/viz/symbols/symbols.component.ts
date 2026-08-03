@@ -6,7 +6,6 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { Router } from '@angular/router';
 import { AnalysisStore } from '../../core/state/analysis.store';
 import {
   FolderSurface,
@@ -392,7 +391,6 @@ export class SymbolsVizComponent {
   readonly store = inject(AnalysisStore);
   private readonly index = inject(SymbolIndexService);
   private readonly selection = inject(AstSelectionService);
-  private readonly router = inject(Router);
 
   readonly tab = signal<Tab>('unused');
   readonly copied = signal(false);
@@ -530,6 +528,5 @@ export class SymbolsVizComponent {
       endRow: def.endRow,
       endCol: def.endCol,
     });
-    void this.router.navigate(['/ast']);
   }
 }

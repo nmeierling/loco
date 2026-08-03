@@ -12,7 +12,7 @@ import {
 } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
+import { TabsStore } from '../../core/state/tabs.store';
 import { AnalysisStore } from '../../core/state/analysis.store';
 import { IgnoreService } from '../../core/services/ignore.service';
 import { FileNode, MetricKind, TreeNode, fileCount, isFile } from '../../core/models/tree';
@@ -431,7 +431,7 @@ const METRICS: MetricKind[] = ['loc', 'complexity', 'churn', 'risk'];
 export class MetricListComponent {
   private readonly store = inject(AnalysisStore);
   private readonly ig = inject(IgnoreService);
-  private readonly router = inject(Router);
+  private readonly tabs = inject(TabsStore);
   private readonly destroyRef = inject(DestroyRef);
 
   /** Absent while an empty state is showing — the scroller is inside the @else branch. */
@@ -675,8 +675,7 @@ export class MetricListComponent {
   }
 
   openAst(path: string): void {
-    this.store.selectPath(path);
-    this.router.navigate(['/ast']);
+    this.tabs.openFile(path);
   }
 
   private resetScroll(): void {

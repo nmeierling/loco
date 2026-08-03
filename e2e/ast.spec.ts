@@ -12,7 +12,7 @@ test.describe('AST view + source panel + call graph', () => {
       .first()
       .dblclick();
 
-    await page.waitForURL(/\/ast$/);
+    await expect(page.locator('loco-ast-view')).toBeVisible();
     await expect(page.locator('loco-ast-view loco-ast-node').first()).toBeVisible();
 
     // Source panel renders lines
@@ -29,7 +29,7 @@ test.describe('AST view + source panel + call graph', () => {
       .locator('loco-directory-tree .row.file', { hasText: 'catalog.service.ts' })
       .first()
       .dblclick();
-    await page.waitForURL(/\/ast$/);
+    await expect(page.locator('loco-ast-view')).toBeVisible();
 
     const classNode = page
       .locator('loco-ast-view loco-ast-node .row', { hasText: 'class_declaration' })
@@ -50,7 +50,7 @@ test.describe('AST view + source panel + call graph', () => {
       .locator('loco-directory-tree .row.file', { hasText: 'catalog.service.ts' })
       .first()
       .dblclick();
-    await page.waitForURL(/\/ast$/);
+    await expect(page.locator('loco-ast-view')).toBeVisible();
 
     const callsBtn = page.locator('loco-ast-view .mode', { hasText: 'Calls' });
     await expect(callsBtn).toBeEnabled();

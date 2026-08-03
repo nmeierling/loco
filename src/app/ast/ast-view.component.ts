@@ -7,10 +7,11 @@ import {
   computed,
   effect,
   inject,
+  input,
   signal,
 } from '@angular/core';
-import { RouterLink } from '@angular/router';
 import { AnalysisStore } from '../core/state/analysis.store';
+import { TabsStore } from '../core/state/tabs.store';
 import { AstNode, ComplexityService, HighlightToken } from '../core/services/complexity.service';
 import { detectLanguage } from '../core/languages';
 import { AstSelectionService } from './ast-selection.service';
@@ -153,13 +154,7 @@ export class AstNodeComponent {
 @Component({
   selector: 'loco-ast-view',
   standalone: true,
-  imports: [
-    AstNodeComponent,
-    RouterLink,
-    SourcePanelComponent,
-    SymbolGraphComponent,
-    UsagesPanelComponent,
-  ],
+  imports: [AstNodeComponent, SourcePanelComponent, SymbolGraphComponent, UsagesPanelComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @switch (state().kind) {
@@ -167,9 +162,15 @@ export class AstNodeComponent {
         <div class="placeholder">
           <h2>AST view</h2>
           @if (store.root()) {
-            <p>Select a file in the sidebar (double-click to open here).</p>
+            <p>Double-click a file in the sidebar to open it in a tab.</p>
           } @else {
-            <p>No project loaded. <a routerLink="/">Go to heatmap</a> to drop a folder.</p>
+            <p>
+              No project loaded.
+              <button type="button" class="link" (click)="tabs.activateHeatmap()">
+                Go to heatmap
+              </button>
+              to drop a folder.
+            </p>
           }
         </div>
       }
@@ -390,14 +391,27 @@ export class AstNodeComponent {
         font-size: 11px;
         opacity: 0.65;
       }
+      .link {
+        background: none;
+        border: none;
+        color: var(--accent);
+        font: inherit;
+        padding: 0;
+        cursor: pointer;
+        text-decoration: underline;
+      }
     `,
   ],
 })
 export class AstViewComponent {
   readonly store = inject(AnalysisStore);
+  readonly tabs = inject(TabsStore);
   private readonly complexity = inject(ComplexityService);
   private readonly selection = inject(AstSelectionService);
   private readonly symbols = inject(SymbolIndexService);
+
+  /** The file this tab shows. `null` renders the idle placeholder (hidden by the shell). */
+  readonly path = input<string | null>(null);
 
   @ViewChild('splitWrap', { static: false }) splitWrap?: ElementRef<HTMLDivElement>;
 
@@ -435,7 +449,7 @@ export class AstViewComponent {
 
   constructor() {
     effect(() => {
-      const path = this.store.selectedPath();
+      const path = this.path();
       const blobs = this.store.fileBlobs();
       this.selection.setRange(null);
       if (!path) {

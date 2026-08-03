@@ -1,5 +1,5 @@
 import { Injectable, inject, signal } from '@angular/core';
-import { AnalysisStore } from '../core/state/analysis.store';
+import { TabsStore } from '../core/state/tabs.store';
 
 export interface AstRange {
   startRow: number;
@@ -10,7 +10,7 @@ export interface AstRange {
 
 @Injectable({ providedIn: 'root' })
 export class AstSelectionService {
-  private readonly store = inject(AnalysisStore);
+  private readonly tabs = inject(TabsStore);
 
   readonly range = signal<AstRange | null>(null);
 
@@ -25,14 +25,14 @@ export class AstSelectionService {
     this.range.set(r);
   }
 
-  /** Opens `path` in the AST view and highlights `range` once it is parsed. */
+  /** Opens (or focuses) a tab for `path` and highlights `range` once it is parsed. */
   jumpTo(path: string, range: AstRange): void {
-    if (this.store.selectedPath() === path) {
+    if (this.tabs.activePath() === path) {
       this.range.set(range);
       return;
     }
     this.pending.set({ path, range });
-    this.store.selectPath(path);
+    this.tabs.openFile(path);
   }
 
   /** Consumes a pending jump for `path`, if one is waiting. */

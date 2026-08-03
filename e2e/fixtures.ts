@@ -60,15 +60,21 @@ export async function expandFolder(page: Page, name: string): Promise<void> {
 }
 
 /**
- * Opens a fixture file in the AST view through the list viz, narrowing with the
- * toolbar's name filter — the list has no filter box of its own.
+ * Opens a fixture file in a new AST tab through the list viz, narrowing with the
+ * toolbar's name filter — the list has no filter box of its own. Double-clicking a file
+ * opens (or focuses) a tab rather than navigating a route.
  */
 export async function openInAst(page: Page, nameFragment: string): Promise<void> {
   await selectViz(page, 'List');
   const nameFilter = page.locator('loco-filter-bar input[placeholder*="name"]');
   await nameFilter.fill(nameFragment);
   await page.locator('loco-metric-list .row').first().dblclick();
-  await page.waitForURL(/\/ast$/);
+  await expect(page.locator('loco-ast-view')).toBeVisible();
   // Leave the corpus intact for whatever the test does next.
   await nameFilter.fill('');
+}
+
+/** Activates the permanent heatmap tab. */
+export async function showHeatmap(page: Page): Promise<void> {
+  await page.locator('header.head .tab', { hasText: 'heatmap' }).click();
 }

@@ -7,9 +7,9 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { AnalysisService } from '../core/services/analysis.service';
 import { AnalysisStore } from '../core/state/analysis.store';
+import { TabsStore } from '../core/state/tabs.store';
 import { SessionService } from '../core/services/session.service';
 import { IgnoreService } from '../core/services/ignore.service';
 import { VizRegistry } from '../viz/viz-registry';
@@ -20,6 +20,8 @@ import { SpinnerComponent } from './spinner.component';
 import { DirectoryTreeComponent } from './directory-tree.component';
 import { IgnorePanelComponent } from './ignore-panel.component';
 import { MetricsHelpComponent } from './metrics-help.component';
+import { HeatmapPanelComponent } from '../viz/heatmap-panel.component';
+import { AstViewComponent } from '../ast/ast-view.component';
 
 type Side = 'left' | 'right';
 
@@ -44,9 +46,8 @@ const STORAGE_KEY = 'loco.panels.v1';
     DirectoryTreeComponent,
     IgnorePanelComponent,
     MetricsHelpComponent,
-    RouterLink,
-    RouterLinkActive,
-    RouterOutlet,
+    HeatmapPanelComponent,
+    AstViewComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -56,10 +57,32 @@ const STORAGE_KEY = 'loco.panels.v1';
         <span class="tag">lines of code, visualized</span>
       </div>
       <nav class="nav">
-        <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }"
-          >heatmap</a
+        <button
+          type="button"
+          class="tab"
+          [class.active]="!tabs.isAstActive()"
+          (click)="tabs.activateHeatmap()"
         >
-        <a routerLink="/ast" routerLinkActive="active">ast</a>
+          heatmap
+        </button>
+        @for (path of tabs.astTabs(); track path) {
+          <button
+            type="button"
+            class="tab file"
+            [class.active]="tabs.activePath() === path"
+            (click)="tabs.activate(path)"
+            [title]="path"
+          >
+            <span class="tab-name">{{ basename(path) }}</span>
+            <span
+              class="tab-close"
+              role="button"
+              aria-label="Close tab"
+              (click)="closeTab($event, path)"
+              >×</span
+            >
+          </button>
+        }
       </nav>
       @if (store.root(); as r) {
         <div class="root">
@@ -131,7 +154,11 @@ const STORAGE_KEY = 'loco.panels.v1';
         </aside>
 
         <main class="viz-area">
-          <router-outlet />
+          <loco-heatmap-panel [style.display]="tabs.isAstActive() ? 'none' : 'block'" />
+          <loco-ast-view
+            [path]="tabs.activePath()"
+            [style.display]="tabs.isAstActive() ? 'flex' : 'none'"
+          />
         </main>
 
         <aside
@@ -210,18 +237,55 @@ const STORAGE_KEY = 'loco.panels.v1';
       .nav {
         display: flex;
         gap: 4px;
+        align-items: center;
+        min-width: 0;
+        overflow-x: auto;
       }
-      .nav a {
+      .tab {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
         color: inherit;
-        text-decoration: none;
+        background: transparent;
+        border: 1px solid transparent;
+        font-family: inherit;
         font-size: 12px;
         padding: 4px 8px;
         border-radius: 3px;
         opacity: 0.7;
+        cursor: pointer;
+        white-space: nowrap;
+        max-width: 200px;
       }
-      .nav a.active {
+      .tab:hover {
         opacity: 1;
         background: var(--hover);
+      }
+      .tab.active {
+        opacity: 1;
+        background: var(--hover);
+        border-color: var(--border);
+      }
+      .tab .tab-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      .tab-close {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 15px;
+        height: 15px;
+        border-radius: 3px;
+        opacity: 0.55;
+        font-size: 13px;
+        line-height: 1;
+        flex-shrink: 0;
+      }
+      .tab-close:hover {
+        opacity: 1;
+        background: color-mix(in srgb, var(--danger) 30%, transparent);
       }
       .root {
         margin-left: auto;
@@ -433,6 +497,7 @@ const STORAGE_KEY = 'loco.panels.v1';
 })
 export class ShellComponent {
   readonly store = inject(AnalysisStore);
+  readonly tabs = inject(TabsStore);
   readonly session = inject(SessionService);
   private readonly analysis = inject(AnalysisService);
   private readonly ig = inject(IgnoreService);
@@ -529,6 +594,8 @@ export class ShellComponent {
       this.store.filters();
       this.store.selectedPath();
       this.ig.userPatterns();
+      this.tabs.astTabs();
+      this.tabs.activePath();
       this.session.queueMeta();
     });
     effect(() => {
@@ -605,6 +672,7 @@ export class ShellComponent {
 
   async onLoaded(result: LoadResult): Promise<void> {
     this.errorMessage.set(null);
+    this.tabs.clear();
     try {
       await this.analysis.analyze(result);
     } catch (e) {
@@ -620,9 +688,20 @@ export class ShellComponent {
 
   reset(): void {
     this.store.clear();
+    this.tabs.clear();
     this.ig.clearUserPatterns();
     this.errorMessage.set(null);
     void this.session.discard();
+  }
+
+  closeTab(ev: Event, path: string): void {
+    ev.stopPropagation();
+    this.tabs.close(path);
+  }
+
+  basename(path: string): string {
+    const i = path.lastIndexOf('/');
+    return i === -1 ? path : path.slice(i + 1);
   }
 
   private async restoreSession(): Promise<void> {

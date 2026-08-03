@@ -10,7 +10,7 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { Router } from '@angular/router';
+import { TabsStore } from '../../core/state/tabs.store';
 import { HierarchyRectangularNode, hierarchy, partition } from 'd3-hierarchy';
 import { arc as d3arc } from 'd3-shape';
 import { scaleOrdinal } from 'd3-scale';
@@ -130,7 +130,7 @@ interface Segment {
 })
 export class SunburstComponent implements AfterViewInit {
   private readonly store = inject(AnalysisStore);
-  private readonly router = inject(Router);
+  private readonly tabs = inject(TabsStore);
   private readonly destroyRef = inject(DestroyRef);
 
   @ViewChild('wrap', { static: true }) wrap!: ElementRef<HTMLDivElement>;
@@ -176,10 +176,7 @@ export class SunburstComponent implements AfterViewInit {
   }
 
   onDblClick(s: Segment): void {
-    if (s.isFile) {
-      this.store.selectPath(s.path);
-      this.router.navigate(['/ast']);
-    }
+    if (s.isFile) this.tabs.openFile(s.path);
   }
 
   onMove(ev: MouseEvent): void {

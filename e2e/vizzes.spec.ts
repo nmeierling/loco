@@ -83,7 +83,7 @@ test.describe('Alternative vizzes (sunburst, module graph, dep matrix)', () => {
     // The force layout spreads nodes beyond the visible area on a graph this size, so
     // pick one that is actually on screen rather than whichever comes first in the DOM.
     await dblclickVisibleNode(page);
-    await page.waitForURL(/\/ast$/);
+    await expect(page.locator('loco-ast-view')).toBeVisible();
     await expect(page.locator('loco-ast-view loco-ast-node').first()).toBeVisible();
   });
 

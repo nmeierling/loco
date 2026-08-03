@@ -24,6 +24,9 @@ export interface SessionMeta {
   tree: DirNode;
   filters: Filters;
   selectedPath: string | null;
+  /** Open AST tabs (file paths) and which one is active — restored on reload. */
+  openTabs?: readonly string[];
+  activeTab?: string | null;
   vizId: string | null;
   ignorePatterns: readonly string[];
   churn: ChurnState;
