@@ -74,7 +74,7 @@ const STORAGE_KEY = 'loco.panels.v1';
             (click)="onTabClick($event, path)"
             [title]="shiftHeld() ? 'Click to close' : path"
           >
-            <span class="tab-name">{{ basename(path) }}</span>
+            <span class="tab-name">{{ tabLabel(path) }}</span>
             <span
               class="tab-close"
               role="button"
@@ -260,7 +260,7 @@ const STORAGE_KEY = 'loco.panels.v1';
         opacity: 0.7;
         cursor: pointer;
         white-space: nowrap;
-        max-width: 200px;
+        max-width: 360px;
       }
       .tab:hover {
         opacity: 1;
@@ -503,6 +503,9 @@ const STORAGE_KEY = 'loco.panels.v1';
         min-width: 0;
         display: flex;
         flex-direction: column;
+        /* Confine the AST view's sticky, z-indexed tab row to its own stacking context so
+           it can't paint over the neighbouring Ignore sidebar. */
+        isolation: isolate;
       }
       .status {
         border-top: 1px solid var(--border);
@@ -745,6 +748,16 @@ export class ShellComponent {
   basename(path: string): string {
     const i = path.lastIndexOf('/');
     return i === -1 ? path : path.slice(i + 1);
+  }
+
+  /**
+   * Tab caption: the file's base name, kept whole up to 40 chars and otherwise
+   * middle-elided (first 10 + "…" + last 27) so the extension stays visible.
+   */
+  tabLabel(path: string): string {
+    const name = this.basename(path);
+    if (name.length <= 40) return name;
+    return name.slice(0, 10) + '...' + name.slice(-27);
   }
 
   private async restoreSession(): Promise<void> {

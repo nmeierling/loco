@@ -194,6 +194,8 @@ const MINIMAP_PAD = 8;
         width: 100%;
         height: 100%;
         min-height: 0;
+        /* Shrink within the AST split grid rather than overflow its cell. */
+        min-width: 0;
       }
       .wrap {
         position: relative;

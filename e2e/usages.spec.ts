@@ -2,79 +2,173 @@ import { expect, test } from '@playwright/test';
 import { loadFixture, openInAst } from './fixtures';
 
 test.describe('AST usages panel', () => {
-  test('lists the symbols a file declares with their repo-wide usage counts', async ({ page }) => {
+  test('the Incoming tab groups outside classes by which of this file they use', async ({
+    page,
+  }) => {
     await loadFixture(page);
     await openInAst(page, 'catalog.store');
     await page.locator('loco-ast-view .mode', { hasText: 'Usages' }).click();
 
-    const rows = page.locator('loco-usages-panel .sym-head');
-    await expect(rows.first()).toBeVisible();
+    // Incoming is the default direction.
+    await expect(page.locator('loco-usages-panel .tabs button.active')).toContainText('Incoming');
 
-    // The store class itself is imported all over the app.
-    const classRow = rows.filter({ hasText: 'CatalogStore' }).first();
-    await expect(classRow).toContainText(/\d+ in \d+ files/);
+    const groups = page.locator('loco-usages-panel .grp-head');
+    await expect(groups.first()).toBeVisible();
 
-    // Its methods are listed as members and are used outside this file.
-    const method = rows.filter({ hasText: 'selectProduct' }).first();
-    await expect(method).toContainText('method');
-    await expect(method).toContainText(/\d+ in \d+ files/);
+    // CartComponent calls the store, so it shows up as an incoming class with a count.
+    const cart = groups.filter({ hasText: 'CartComponent' }).first();
+    await expect(cart).toBeVisible();
+    await expect(cart).toContainText('app/ui/cart.component.ts');
+    await expect(cart).toContainText(/\d+×/);
+
+    // Expanding it lists which of this file's members it uses — selectProduct among them.
+    await cart.click();
+    const members = page.locator('loco-usages-panel .grp .mem-head');
+    await expect(members.filter({ hasText: 'selectProduct' }).first()).toBeVisible();
   });
 
-  test('expanding a symbol shows call sites grouped by file', async ({ page }) => {
+  test('expanding an incoming member shows the external call sites and navigates', async ({
+    page,
+  }) => {
     await loadFixture(page);
     await openInAst(page, 'catalog.store');
     await page.locator('loco-ast-view .mode', { hasText: 'Usages' }).click();
-    await expect(page.locator('loco-usages-panel .sym-head').first()).toBeVisible();
 
-    await page.locator('loco-usages-panel .sym-head', { hasText: 'selectProduct' }).first().click();
+    await page.locator('loco-usages-panel .grp-head', { hasText: 'CartComponent' }).first().click();
+    await page
+      .locator('loco-usages-panel .mem-head', { hasText: 'selectProduct' })
+      .first()
+      .click();
 
     const refs = page.locator('loco-usages-panel .ref');
     await expect(refs.first()).toBeVisible();
-    expect(await refs.count()).toBeGreaterThan(2);
-
-    // Usages come from more than one file, and each carries its source line.
-    const files = await page.locator('loco-usages-panel .ref-path').allTextContents();
-    expect(new Set(files).size).toBeGreaterThan(1);
     await expect(refs.first().locator('code')).toContainText('selectProduct');
-  });
 
-  test('clicking a usage opens that file and highlights the line', async ({ page }) => {
-    await loadFixture(page);
-    await openInAst(page, 'catalog.store');
-    await page.locator('loco-ast-view .mode', { hasText: 'Usages' }).click();
-    await expect(page.locator('loco-usages-panel .sym-head').first()).toBeVisible();
-    await page.locator('loco-usages-panel .sym-head', { hasText: 'selectProduct' }).first().click();
-
+    // Clicking a usage opens the calling file and highlights the exact line.
     const before = await page.locator('loco-ast-view:visible .path').textContent();
-    const target = page.locator('loco-usages-panel .ref').first();
-    const lineNo = (await target.locator('.ref-line').textContent())?.trim();
-    await target.click();
+    const lineNo = (await refs.first().locator('.ref-line').textContent())?.trim();
+    await refs.first().click();
 
     await expect
       .poll(() => page.locator('loco-ast-view:visible .path').textContent())
       .not.toBe(before);
-    // The source pane highlights the exact line the usage sits on.
     const highlighted = page.locator('loco-ast-view:visible loco-source-panel .row.highlighted');
     await expect(highlighted.first()).toBeVisible();
     const num = await highlighted.first().locator('.num').textContent();
     expect(num?.trim()).toBe(lineNo);
   });
 
-  test('the Uses tab lists symbols this file pulls in from elsewhere', async ({ page }) => {
+  test('the Outgoing tab groups the classes this file depends on', async ({ page }) => {
     await loadFixture(page);
     await openInAst(page, 'cart.component');
     await page.locator('loco-ast-view .mode', { hasText: 'Usages' }).click();
-    await expect(page.locator('loco-usages-panel .sym-head').first()).toBeVisible();
 
-    await page.locator('loco-usages-panel .tabs button', { hasText: 'Uses' }).click();
+    await page.locator('loco-usages-panel .tabs button', { hasText: 'Outgoing' }).click();
+
+    const groups = page.locator('loco-usages-panel .grp-head');
+    await expect(groups.first()).toBeVisible();
+
+    // It injects CatalogStore, so the store is an outgoing class carrying its own file path.
+    const store = groups.filter({ hasText: 'CatalogStore' }).first();
+    await expect(store).toBeVisible();
+    await expect(store).toContainText('app/core/state/catalog.store.ts');
+
+    // The members it calls are listed, and each expands to sites inside this file.
+    await store.click();
+    const method = page.locator('loco-usages-panel .mem-head', { hasText: 'selectProduct' }).first();
+    await expect(method).toBeVisible();
+    await method.click();
+    const refs = page.locator('loco-usages-panel .ref');
+    await expect(refs.filter({ hasText: 'selectProduct' }).first()).toBeVisible();
+  });
+
+  test('the External tab groups third-party dependencies by module', async ({ page }) => {
+    await loadFixture(page);
+    await openInAst(page, 'cart.component');
+    await page.locator('loco-ast-view .mode', { hasText: 'Usages' }).click();
+
+    await page.locator('loco-usages-panel .tabs button', { hasText: 'External' }).click();
+
+    // cart.component imports Subject from rxjs — the one out-of-repo dependency.
+    const dep = page.locator('loco-usages-panel .grp-head', { hasText: 'rxjs' }).first();
+    await expect(dep).toBeVisible();
+    await expect(dep).toContainText(/\d+×/);
+
+    await dep.click();
+    const member = page.locator('loco-usages-panel .mem-head', { hasText: 'Subject' }).first();
+    await expect(member).toBeVisible();
+
+    // Its usage sites (the import and the `new Subject()`) are listed and jump within the file.
+    await member.click();
+    await expect(page.locator('loco-usages-panel .ref').first()).toBeVisible();
+  });
+
+  test('the Self tab ranks a file’s members by how often it uses them itself', async ({ page }) => {
+    await loadFixture(page);
+    await openInAst(page, 'catalog.store');
+    await page.locator('loco-ast-view .mode', { hasText: 'Usages' }).click();
+
+    await page.locator('loco-usages-panel .tabs button', { hasText: 'Self' }).click();
 
     const rows = page.locator('loco-usages-panel .sym-head');
     await expect(rows.first()).toBeVisible();
-    // It injects CatalogStore, so the store and the methods it calls show up here.
-    await expect(rows.filter({ hasText: 'CatalogStore' }).first()).toBeVisible();
-    await expect(rows.filter({ hasText: 'CatalogStore' }).first()).toContainText(
-      'app/core/state/catalog.store.ts',
-    );
+
+    // The private `products` field is read from many methods, so it ranks near the top.
+    await expect(rows.filter({ hasText: 'products' }).first()).toBeVisible();
+
+    // Counts are non-increasing down the list.
+    const counts = await page
+      .locator('loco-usages-panel .sym-head .badge')
+      .allTextContents();
+    const nums = counts.map((c) => Number(c.replace(/[^\d]/g, '')));
+    for (let i = 1; i < nums.length; i++) expect(nums[i]).toBeLessThanOrEqual(nums[i - 1]);
+
+    // Expanding a member shows its in-file references.
+    await rows.filter({ hasText: 'products' }).first().click();
+    await expect(page.locator('loco-usages-panel .ref').first()).toBeVisible();
+  });
+
+  test('a wildcard ignore pattern removes those files from the usages', async ({ page }) => {
+    await loadFixture(page);
+    await openInAst(page, 'catalog.store');
+    await page.locator('loco-ast-view .mode', { hasText: 'Usages' }).click();
+
+    const groups = page.locator('loco-usages-panel .grp-head');
+    await expect(groups.filter({ hasText: 'CartComponent' }).first()).toBeVisible();
+
+    // Ignore the whole ui/ folder with a path glob — the components living there should
+    // drop out of the incoming list, proving usages honour the (wildcard) ignore list.
+    const ignore = page.locator('loco-ignore-panel .input');
+    await ignore.fill('**/ui/**');
+    await page.locator('loco-ignore-panel .add-btn').click();
+
+    await expect(groups.filter({ hasText: 'CartComponent' })).toHaveCount(0);
+    await expect(groups.filter({ hasText: 'CheckoutComponent' })).toHaveCount(0);
+    // A class outside the ignored folder still shows.
+    await expect(groups.filter({ hasText: 'CatalogService' }).first()).toBeVisible();
+  });
+
+  test('the tabs stay visible within the pane when it is narrow', async ({ page }) => {
+    await page.setViewportSize({ width: 940, height: 800 });
+    await loadFixture(page);
+    // A TS file opens on the Usages tab by default, so the panel is already showing.
+    await openInAst(page, 'catalog.store');
+    await expect(page.locator('loco-usages-panel .tabs button').first()).toBeVisible();
+
+    const panel = (await page.locator('loco-usages-panel').boundingBox())!;
+    const sidebar = (await page.locator('loco-shell .sidebar.right').boundingBox())!;
+    // The panel must not spill under the Ignore sidebar.
+    expect(panel.x + panel.width).toBeLessThanOrEqual(sidebar.x + 1);
+
+    // All four tabs are present and each sits fully inside the panel (wrapping as needed),
+    // never clipped behind the sidebar.
+    const btns = page.locator('loco-usages-panel .tabs button');
+    await expect(btns).toHaveCount(4);
+    for (let i = 0; i < 4; i++) {
+      await expect(btns.nth(i)).toBeVisible();
+      const bb = (await btns.nth(i).boundingBox())!;
+      expect(bb.x + bb.width).toBeLessThanOrEqual(panel.x + panel.width + 1);
+    }
   });
 
   test('identifiers in the source pane link to their declaration', async ({ page }) => {
@@ -97,33 +191,6 @@ test.describe('AST usages panel', () => {
     const highlighted = page.locator('loco-ast-view:visible loco-source-panel .row.highlighted');
     await expect(highlighted.first()).toBeVisible();
     await expect(highlighted.first()).toContainText('selectProduct');
-  });
-
-  test('the impact tab walks outwards through callers', async ({ page }) => {
-    await loadFixture(page);
-    await openInAst(page, 'catalog.store');
-    await page.locator('loco-ast-view .mode', { hasText: 'Usages' }).click();
-    await page.locator('loco-usages-panel .sym-head', { hasText: 'selectProduct' }).first().click();
-    await page.locator('loco-usages-panel .submodes button', { hasText: 'Impact' }).click();
-
-    // First level: the methods that call it.
-    const callers = page.locator('loco-usages-panel .caller-head');
-    await expect(callers.first()).toBeVisible();
-    const firstLevel = await callers.count();
-    expect(firstLevel).toBeGreaterThan(3);
-    await expect(callers.filter({ hasText: 'CheckoutComponent.confirm' })).toHaveCount(1);
-
-    // Second level: bootstrap reaches selectProduct through confirm().
-    await page
-      .locator('loco-usages-panel .caller-row', { hasText: 'CheckoutComponent.confirm' })
-      .locator('.chev-btn')
-      .click();
-    await expect.poll(() => callers.count()).toBeGreaterThan(firstLevel);
-    await expect(callers.filter({ hasText: 'bootstrap' }).first()).toBeVisible();
-
-    // Clicking a caller navigates to it.
-    await callers.filter({ hasText: 'bootstrap' }).first().click();
-    await expect(page.locator('loco-ast-view:visible .path')).toHaveText('app/app.ts');
   });
 
   test('a file with no grammar opens as an editor-only preview, no mode buttons', async ({

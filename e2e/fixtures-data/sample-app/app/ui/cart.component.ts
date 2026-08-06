@@ -1,9 +1,13 @@
+import { Subject } from 'rxjs';
 import { CatalogStore } from '../core/state/catalog.store';
 import { PricingService } from '../core/services/pricing.service';
 import { Product } from '../core/models/product';
 import { formatCount, formatMoney } from '../utils/format';
 
 export class CartComponent {
+  // A third-party dependency, so the usages panel's External tab has something to show.
+  readonly changed = new Subject<void>();
+
   constructor(
     private readonly store: CatalogStore,
     private readonly pricing: PricingService,

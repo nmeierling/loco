@@ -22,3 +22,5 @@ Shape the specs rely on:
   the one import cycle the module graph's detector is tested against.
 - `bootstrap()` in `app/app.ts` reaches `CatalogStore.selectProduct` through two hops,
   giving the impact trace a chain deeper than one level.
+- `app/ui/cart.component.ts` imports `Subject` from `rxjs` — the one out-of-repo
+  dependency, so the usages panel's External tab has something to group.

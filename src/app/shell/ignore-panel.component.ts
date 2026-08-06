@@ -49,7 +49,7 @@ import { AnalysisStore } from '../core/state/analysis.store';
         <input
           class="input"
           type="text"
-          placeholder="e.g. *.snap, src/legacy/"
+          placeholder="e.g. *.snap, **/test/**, src/legacy/"
           [ngModel]="draft()"
           (ngModelChange)="draft.set($event)"
           name="pattern"

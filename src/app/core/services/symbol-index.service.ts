@@ -52,10 +52,28 @@ export interface SymbolRef {
   enclosingId: string | null;
 }
 
-/** One step of a caller trace: who reaches a symbol, and from which lines. */
-export interface CallerEdge {
-  def: SymbolDef;
-  refs: SymbolRef[];
+/**
+ * A use of a symbol imported from outside the repo — a third-party dependency (Spring,
+ * a Neo4j client, lodash…). These never resolve to a {@link SymbolDef}, so they are kept
+ * separately to power the "External" direction.
+ */
+export interface ExternalRef {
+  /**
+   * The dependency it comes from: the package for JVM imports (`org.neo4j.driver`), the
+   * bare module specifier for JS/TS (`neo4j-driver`, `@angular/core`).
+   */
+  module: string;
+  /** Local name the import introduces in this file (`Driver`). */
+  name: string;
+  /** Name as exported by the module (differs from `name` only for aliased imports). */
+  imported: string;
+  path: string;
+  row: number;
+  col: number;
+  endRow: number;
+  endCol: number;
+  line: string;
+  kind: 'import' | 'call' | 'read';
 }
 
 /** A slice of the symbol call/usage graph: nodes and the caller→callee edges among them. */
@@ -71,6 +89,8 @@ export interface SymbolIndex {
   refsByDef: ReadonlyMap<string, SymbolRef[]>;
   /** Usages grouped by the file they appear in — powers the "uses" direction. */
   refsByPath: ReadonlyMap<string, SymbolRef[]>;
+  /** Out-of-repo dependency usages per file — powers the "external" direction. */
+  externalByPath: ReadonlyMap<string, ExternalRef[]>;
   /** Files that were parsed for symbols. */
   indexedPaths: ReadonlySet<string>;
 }
@@ -97,6 +117,7 @@ const EMPTY: SymbolIndex = {
   defsByPath: new Map(),
   refsByDef: new Map(),
   refsByPath: new Map(),
+  externalByPath: new Map(),
   indexedPaths: new Set(),
 };
 
@@ -144,32 +165,6 @@ export class SymbolIndexService {
     this._index.set(null);
     this.building.set(null);
     this.builtFor = -1;
-  }
-
-  /**
-   * Declarations that reference `defId`, each with the lines that do it. One level —
-   * callers of callers come from calling this again, which keeps a trace lazy.
-   */
-  callers(defId: string): CallerEdge[] {
-    const idx = this._index();
-    if (!idx) return [];
-    const byCaller = new Map<string, SymbolRef[]>();
-    for (const ref of idx.refsByDef.get(defId) ?? []) {
-      // A symbol referencing itself (recursion, or a class naming its own type) is
-      // not a caller worth walking.
-      if (!ref.enclosingId || ref.enclosingId === defId) continue;
-      const list = byCaller.get(ref.enclosingId) ?? [];
-      list.push(ref);
-      byCaller.set(ref.enclosingId, list);
-    }
-    const out: CallerEdge[] = [];
-    for (const [id, refs] of byCaller) {
-      const def = idx.defsById.get(id);
-      if (def) out.push({ def, refs });
-    }
-    return out.sort(
-      (a, b) => b.refs.length - a.refs.length || a.def.name.localeCompare(b.def.name),
-    );
   }
 
   private ensureAdjacency(idx: SymbolIndex): SymbolAdjacency {
@@ -322,6 +317,12 @@ export function parentFolder(path: string): string {
   return idx >= 0 ? path.slice(0, idx) : '';
 }
 
+/** The package part of a JVM import FQN — everything before the imported class name. */
+function packageOf(fqn: string): string {
+  const dot = fqn.lastIndexOf('.');
+  return dot > 0 ? fqn.slice(0, dot) : fqn;
+}
+
 function defId(path: string, owner: string | null, name: string): string {
   return owner ? `${path}#${owner}.${name}` : `${path}#${name}`;
 }
@@ -452,18 +453,56 @@ export function resolve(scans: readonly FileScan[], allFiles: ReadonlySet<string
   // and top-level declarations instead of through {@link resolveSpecifier}.
   const packageByPath = new Map<string, string>();
   const declsByPath = new Map<string, string[]>();
+  // Kotlin and Java reach a sibling declaration in the same package without importing it
+  // (a Spring controller and its repository often share one package), so index every JVM
+  // file's top-level names and members by package. These are consulted only when a name is
+  // unique in the package — the same no-guessing rule the import-driven resolution uses.
+  const jvmTopsByPackage = new Map<string, Map<string, SymbolDef[]>>();
+  const jvmMembersByPackage = new Map<string, Map<string, SymbolDef[]>>();
+  // Members declared anywhere in the project, by name. A member call that resolves to no
+  // imported, local or same-package class falls back to this — inherited members live on a
+  // project-defined supertype (a Spring `BaseRepository`, an abstract controller) in
+  // another package, and the receiver's static type is unknown here. Consulted last and
+  // only when the name is unique repo-wide, so a common name stays unresolved rather than
+  // guessed at. Framework methods (`findAll`, `save`) are never indexed, so they don't
+  // pollute this map.
+  const jvmMembersByName = new Map<string, SymbolDef[]>();
+  const addToPackage = (m: Map<string, SymbolDef[]>, name: string, def: SymbolDef): void => {
+    const list = m.get(name) ?? [];
+    list.push(def);
+    m.set(name, list);
+  };
   for (const scan of scans) {
     if (!JVM_LANGS.has(scan.langId)) continue;
-    packageByPath.set(scan.path, scan.pkg ?? '');
+    const pkg = scan.pkg ?? '';
+    packageByPath.set(scan.path, pkg);
     declsByPath.set(
       scan.path,
       scan.symbols.filter((s) => s.owner === null).map((s) => s.name),
     );
+    let tops = jvmTopsByPackage.get(pkg);
+    if (!tops) {
+      tops = new Map();
+      jvmTopsByPackage.set(pkg, tops);
+    }
+    for (const d of topLevelOf.get(scan.path)?.values() ?? []) addToPackage(tops, d.name, d);
+    let mems = jvmMembersByPackage.get(pkg);
+    if (!mems) {
+      mems = new Map();
+      jvmMembersByPackage.set(pkg, mems);
+    }
+    for (const list of membersOf.get(scan.path)?.values() ?? []) {
+      for (const d of list) {
+        addToPackage(mems, d.name, d);
+        addToPackage(jvmMembersByName, d.name, d);
+      }
+    }
   }
   const jvmCtx = buildJvmContext(packageByPath, declsByPath);
 
   const refsByDef = new Map<string, SymbolRef[]>();
   const refsByPath = new Map<string, SymbolRef[]>();
+  const externalByPath = new Map<string, ExternalRef[]>();
 
   const record = (ref: SymbolRef): void => {
     const byDef = refsByDef.get(ref.defId) ?? [];
@@ -510,6 +549,24 @@ export function resolve(scans: readonly FileScan[], allFiles: ReadonlySet<string
       }
     }
 
+    // local name to the out-of-repo dependency it came from. An import that resolves to no
+    // repo file is a third-party package (Spring, a Neo4j client, lodash…). For JS/TS only
+    // a bare specifier counts — an unresolved relative path is a missing or asset import.
+    const isJvmLang = JVM_LANGS.has(scan.langId);
+    const externalNames = new Map<string, { module: string; imported: string }>();
+    for (const b of scan.bindings) {
+      const target = isJvmLang
+        ? resolveJvm(b.specifier, jvmCtx)
+        : resolveSpecifier(b.specifier, scan.path, scan.langId, allFiles as Set<string>);
+      if (target) continue;
+      const isBare = isJvmLang || (!b.specifier.startsWith('.') && !b.specifier.startsWith('/'));
+      if (!isBare) continue;
+      const module = isJvmLang ? packageOf(b.specifier) : b.specifier;
+      for (const [local, original] of b.names) {
+        externalNames.set(local, { module, imported: original });
+      }
+    }
+
     const localTops = topLevelOf.get(scan.path) ?? new Map<string, SymbolDef>();
 
     // Member names reachable from this file, split by where they come from. `this.foo`
@@ -538,6 +595,9 @@ export function resolve(scans: readonly FileScan[], allFiles: ReadonlySet<string
     }
 
     const isJvmScan = JVM_LANGS.has(scan.langId);
+    // Sibling declarations in the same package, resolved without an import.
+    const pkgTops = isJvmScan ? jvmTopsByPackage.get(scan.pkg ?? '') : undefined;
+    const pkgMembers = isJvmScan ? jvmMembersByPackage.get(scan.pkg ?? '') : undefined;
     // A member declared on the class an unqualified call sits in. Java and Kotlin call
     // sibling methods without a `this.` receiver (`create()`), so a bare call resolves
     // against the enclosing class before giving up — scoped to that class, and only when
@@ -563,11 +623,38 @@ export function resolve(scans: readonly FileScan[], allFiles: ReadonlySet<string
         const first = raw.viaThis ? localMembers : importedMembers;
         const second = raw.viaThis ? importedMembers : localMembers;
         def = only(first.get(raw.name)) ?? only(second.get(raw.name));
+        // Fall back to a uniquely-named member in the same package, then repo-wide — the
+        // latter catches members inherited from a supertype declared in another package.
+        if (!def && pkgMembers) def = only(pkgMembers.get(raw.name));
+        if (!def && isJvmScan) def = only(jvmMembersByName.get(raw.name));
       } else {
         def = imported.get(raw.name) ?? localTops.get(raw.name);
         if (!def && raw.call && isJvmScan) def = enclosingClassMember(enclosingId, raw.name);
+        // A bare type or top-level name from a sibling file in the same package.
+        if (!def && pkgTops) def = only(pkgTops.get(raw.name));
       }
-      if (!def) continue;
+      if (!def) {
+        // An unresolved name that came from a third-party import is an external dependency
+        // use; everything else (locals, framework globals) is simply not tracked.
+        const ext = externalNames.get(raw.name);
+        if (ext) {
+          const list = externalByPath.get(scan.path) ?? [];
+          list.push({
+            module: ext.module,
+            name: raw.name,
+            imported: ext.imported,
+            path: scan.path,
+            row: raw.row,
+            col: raw.col,
+            endRow: raw.endRow,
+            endCol: raw.endCol,
+            line: (scan.lines[raw.row] ?? '').trim().slice(0, 160),
+            kind: raw.shape === 'import' ? 'import' : raw.call ? 'call' : 'read',
+          });
+          externalByPath.set(scan.path, list);
+        }
+        continue;
+      }
       record({
         defId: def.id,
         path: scan.path,
@@ -585,12 +672,16 @@ export function resolve(scans: readonly FileScan[], allFiles: ReadonlySet<string
   for (const list of refsByDef.values()) {
     list.sort((a, b) => a.path.localeCompare(b.path) || a.row - b.row);
   }
+  for (const list of externalByPath.values()) {
+    list.sort((a, b) => a.row - b.row || a.col - b.col);
+  }
 
   return {
     defsById,
     defsByPath,
     refsByDef,
     refsByPath,
+    externalByPath,
     indexedPaths: new Set(scans.map((s) => s.path)),
   };
 }

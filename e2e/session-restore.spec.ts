@@ -47,10 +47,11 @@ test.describe('Session survives a reload', () => {
     // Source text came out of the cache, so the editor renders — and a TS file opens on
     // the Usages tab by default, proving the symbol index rebuilt from the cached blobs.
     await expect(page.locator('loco-source-panel .row').first()).toBeVisible();
-    await expect(page.locator('loco-usages-panel .sym-head').first()).toBeVisible();
-    await expect(
-      page.locator('loco-usages-panel .sym-head', { hasText: 'CatalogStore' }).first(),
-    ).toContainText(/\d+ in \d+ files/);
+    // The Incoming direction lists the outside classes that use this store — proof the
+    // repo-wide index came back, not just this file's own text.
+    const incoming = page.locator('loco-usages-panel .grp-head');
+    await expect(incoming.first()).toBeVisible();
+    await expect(incoming.filter({ hasText: 'CartComponent' }).first()).toContainText(/\d+×/);
   });
 
   test('change folder wipes the cache so the next reload starts clean', async ({ page }) => {

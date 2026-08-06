@@ -397,7 +397,10 @@ export class AstNodeComponent {
       .split {
         flex: 1;
         display: grid;
-        grid-template-columns: 45% 6px 1fr;
+        /* minmax(0, …) lets both panes shrink below their content's min width. Without the
+           0 floor the right pane keeps its intrinsic width and the whole split overflows
+           the viz-area — sliding under the Ignore sidebar and hiding the usages tabs. */
+        grid-template-columns: minmax(0, 45%) 6px minmax(0, 1fr);
         min-height: 0;
         min-width: 0;
       }
@@ -535,7 +538,11 @@ export class AstViewComponent {
   private readonly hexBytesSig = signal<Uint8Array>(new Uint8Array());
 
   readonly splitFraction = signal<number>(loadSplitFraction());
-  readonly splitTemplate = computed(() => `${(this.splitFraction() * 100).toFixed(2)}% 6px 1fr`);
+  // minmax(0, …) on both tracks lets the panes shrink below their content width; a bare
+  // `1fr` keeps the right pane at its intrinsic width, overflowing under the sidebar.
+  readonly splitTemplate = computed(
+    () => `minmax(0, ${(this.splitFraction() * 100).toFixed(2)}%) 6px minmax(0, 1fr)`,
+  );
 
   onDividerDown(ev: MouseEvent): void {
     if (!this.splitWrap) return;
