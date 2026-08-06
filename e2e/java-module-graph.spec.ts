@@ -13,7 +13,7 @@ test.describe('Module graph — Java support', () => {
     await page.waitForSelector('loco-treemap svg');
     await page.waitForSelector('loco-spinner .overlay', { state: 'hidden' }).catch(() => undefined);
 
-    await page.locator('loco-filter-bar .chip', { hasText: 'Module graph' }).click();
+    await page.locator('loco-viz-switcher .tab', { hasText: 'Module graph' }).click();
     await page.waitForSelector('loco-module-graph svg circle');
 
     const nodeLabels = await page.$$eval('loco-module-graph svg .node text', (els) =>

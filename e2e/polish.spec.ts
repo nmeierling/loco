@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { expandFolder, loadFixture, showAstTree } from './fixtures';
+import { expandFolder, loadFixture, setNameFilter, showAstTree } from './fixtures';
 
 test.describe('Empty-state, resizable AST split, syntax highlighting', () => {
   test('treemap shows a tailored "no matches" empty state + clear button restores tiles', async ({
@@ -10,7 +10,7 @@ test.describe('Empty-state, resizable AST split, syntax highlighting', () => {
     expect(initial).toBeGreaterThan(10);
 
     // Type a name filter that nothing in src/ will match.
-    await page.locator('loco-filter-bar input[placeholder*="name"]').fill('zzznotafile');
+    await setNameFilter(page, 'zzznotafile');
 
     // Tiles disappear and we get the no-matches empty state.
     await expect(page.locator('loco-treemap .empty .empty-title')).toContainText(/no files match/i);
@@ -20,7 +20,7 @@ test.describe('Empty-state, resizable AST split, syntax highlighting', () => {
 
     // Click "Clear name & path filters" — the filter input empties, tiles return.
     await clearBtn.click();
-    await expect(page.locator('loco-filter-bar input[placeholder*="name"]')).toHaveValue('');
+    await expect(page.locator('loco-file-browser input[placeholder*="name"]')).toHaveValue('');
     await expect.poll(() => page.locator('loco-treemap svg rect').count()).toBe(initial);
   });
 

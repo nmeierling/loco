@@ -1,17 +1,26 @@
 import { expect, test } from '@playwright/test';
-import { FIXTURE_ROOT_NAME, loadFixture, openInAst, resetApp, selectViz } from './fixtures';
+import {
+  FIXTURE_ROOT_NAME,
+  loadFixture,
+  openInAst,
+  resetApp,
+  selectMetric,
+  selectViz,
+  setPathFilter,
+} from './fixtures';
 
 test.describe('Session survives a reload', () => {
   test('a reload comes back to the analysed project, not the drop zone', async ({ page }) => {
     await loadFixture(page);
-    const files = await page.locator('loco-filter-bar .stats').textContent();
+    const tiles = await page.locator('loco-treemap svg rect').count();
 
     await page.reload();
 
     await expect(page.locator('loco-drop-zone')).toHaveCount(0);
     await expect(page.locator('loco-treemap svg rect').first()).toBeVisible();
     await expect(page.locator('loco-shell .root-name')).toHaveText(FIXTURE_ROOT_NAME);
-    await expect(page.locator('loco-filter-bar .stats')).toHaveText(files ?? '');
+    // The same corpus came back, not a fresh (empty) read.
+    await expect.poll(() => page.locator('loco-treemap svg rect').count()).toBe(tiles);
     // The header says this is a cached copy rather than a fresh read.
     await expect(page.locator('loco-shell .cache')).toContainText('cached');
   });
@@ -19,8 +28,8 @@ test.describe('Session survives a reload', () => {
   test('filters, metric and the active viz come back too', async ({ page }) => {
     await loadFixture(page);
     await selectViz(page, 'List');
-    await page.locator('loco-filter-bar .chip', { hasText: 'Complexity' }).click();
-    await page.locator('loco-filter-bar input.search.path').fill('app/core');
+    await selectMetric(page, 'complexity');
+    await setPathFilter(page, 'app/core');
     await expect(page.locator('loco-metric-list .row').first()).toBeVisible();
     const rows = await page.locator('loco-metric-list .row').count();
 
@@ -29,11 +38,11 @@ test.describe('Session survives a reload', () => {
     await page.reload();
 
     await expect(page.locator('loco-metric-list .row').first()).toBeVisible();
-    await expect(page.locator('loco-filter-bar input.search.path')).toHaveValue('app/core');
-    await expect(
-      page.locator('loco-filter-bar .chip.active', { hasText: 'Complexity' }),
-    ).toBeVisible();
-    await expect(page.locator('loco-filter-bar .chip.active', { hasText: 'List' })).toBeVisible();
+    await expect(page.locator('loco-file-browser input[placeholder*="path"]')).toHaveValue(
+      'app/core',
+    );
+    await expect(page.locator('loco-file-browser .metric select')).toHaveValue('complexity');
+    await expect(page.locator('loco-viz-switcher .tab.active', { hasText: 'List' })).toBeVisible();
     expect(await page.locator('loco-metric-list .row').count()).toBe(rows);
   });
 

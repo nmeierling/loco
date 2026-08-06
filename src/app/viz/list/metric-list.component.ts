@@ -142,7 +142,7 @@ const METRICS: MetricKind[] = ['loc', 'complexity', 'churn', 'risk'];
               <p class="empty-title">No rows match the list filters.</p>
               <p class="empty-hint">
                 The language or minimum-value filters above exclude every visible file. Name and
-                path filtering lives in the toolbar.
+                path filtering lives in the Files sidebar.
               </p>
               <button type="button" class="clear-filters" (click)="clearLocalFilters()">
                 Reset list filters
@@ -602,9 +602,11 @@ export class MetricListComponent {
   });
 
   constructor() {
-    // Follow the toolbar's metric chip: picking a metric ranks the list by it.
+    // Follow the chosen metric: picking one ranks the list by it. `count` has no per-file
+    // column (every file is 1), so it leaves the list's own sort untouched.
     effect(() => {
       const metric = this.store.filters().metric;
+      if (metric === 'count') return;
       untracked(() => {
         this.sortKey.set(metric);
         this.sortDir.set(-1);

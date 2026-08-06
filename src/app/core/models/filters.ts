@@ -1,9 +1,9 @@
-import { MetricKind } from './tree';
+import { DisplayMetric } from './tree';
 
 export interface Filters {
   name: string;
   path: string;
-  metric: MetricKind;
+  metric: DisplayMetric;
 }
 
 export const DEFAULT_FILTERS: Filters = {

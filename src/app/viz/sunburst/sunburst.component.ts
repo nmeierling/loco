@@ -16,7 +16,7 @@ import { arc as d3arc } from 'd3-shape';
 import { scaleOrdinal } from 'd3-scale';
 import { schemeTableau10 } from 'd3-scale-chromatic';
 import { AnalysisStore } from '../../core/state/analysis.store';
-import { DirNode, MetricKind, TreeNode, isDir, isFile, metricValue } from '../../core/models/tree';
+import { DirNode, DisplayMetric, TreeNode, isDir, isFile, metricValue } from '../../core/models/tree';
 
 interface Segment {
   path: string;
@@ -184,7 +184,7 @@ export class SunburstComponent implements AfterViewInit {
     this.tipPos.set({ x: ev.clientX - rect.left, y: ev.clientY - rect.top });
   }
 
-  private layout(root: DirNode | null, metric: MetricKind, w: number, h: number): Segment[] {
+  private layout(root: DirNode | null, metric: DisplayMetric, w: number, h: number): Segment[] {
     if (!root || w <= 0 || h <= 0) return [];
 
     const sumValue = (n: TreeNode): number => (isFile(n) ? Math.max(metricValue(n, metric), 0) : 0);

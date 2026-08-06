@@ -28,7 +28,7 @@ test.describe('Sidebars (left files + right ignore)', () => {
     const resizedWidth = await width(page, left);
 
     // Collapse left, then reopen — the resized width should be restored
-    await page.locator(`${left} .collapse-btn`).click();
+    await page.locator(`${left} .icon-btn.collapse`).click();
     await expect.poll(() => width(page, left)).toBe(28);
     await page.locator(`${left} .open-btn`).click();
     await expect.poll(() => width(page, left)).toBe(resizedWidth);

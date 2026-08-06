@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { loadFixture, selectViz } from './fixtures';
+import { loadFixture, selectMetric, selectViz } from './fixtures';
 
 test.describe('Risk metric', () => {
   test('is computed on demand and ranks the tangled, depended-on file highest', async ({
@@ -11,7 +11,7 @@ test.describe('Risk metric', () => {
     // Risk has no column until it has been asked for — it needs the module graph.
     await expect(page.locator('loco-metric-list .th-label', { hasText: 'Risk' })).toHaveCount(0);
 
-    await page.locator('loco-filter-bar .chip', { hasText: 'Risk' }).click();
+    await selectMetric(page, 'risk');
     await expect(page.locator('loco-metric-list .th-label', { hasText: 'Risk' })).toBeVisible();
 
     // Selecting the metric also sorts by it, so the riskiest file leads.
@@ -29,15 +29,15 @@ test.describe('Risk metric', () => {
   test('the treemap explains itself while the score is being built', async ({ page }) => {
     await loadFixture(page);
 
-    const chip = page.locator('loco-filter-bar .chip', { hasText: 'Risk' });
-    await expect(chip).toBeEnabled();
-    await expect(chip).toHaveAttribute('title', /Click to compute/);
-    await chip.click();
+    const riskOption = page.locator('loco-file-browser .metric select option[value="risk"]');
+    await expect(riskOption).toBeEnabled();
+    await expect(riskOption).toHaveAttribute('title', /Click to compute/);
+    await selectMetric(page, 'risk');
 
     // Either the placeholder is caught mid-build or the score already landed; both
     // end in tiles, and neither leaves an unexplained blank canvas.
     await expect(page.locator('loco-treemap svg rect').first()).toBeVisible();
     await expect(page.locator('loco-treemap .empty')).toHaveCount(0);
-    await expect(chip).toHaveAttribute('title', /0-100 score/);
+    await expect(riskOption).toHaveAttribute('title', /0-100 score/);
   });
 });

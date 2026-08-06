@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { loadFixture } from './fixtures';
+import { loadFixture, selectMetric, setNameFilter } from './fixtures';
 
 test.describe('Heatmap (treemap)', () => {
   test('name filter narrows the tile count, clearing restores it', async ({ page }) => {
@@ -7,18 +7,18 @@ test.describe('Heatmap (treemap)', () => {
     const initial = await page.locator('loco-treemap svg rect').count();
     expect(initial).toBeGreaterThan(10);
 
-    await page.locator('loco-filter-bar input[placeholder*="name"]').fill('component');
+    await setNameFilter(page, 'component');
     await expect.poll(() => page.locator('loco-treemap svg rect').count()).toBeLessThan(initial);
     const filtered = await page.locator('loco-treemap svg rect').count();
     expect(filtered).toBeGreaterThan(0);
 
-    await page.locator('loco-filter-bar input[placeholder*="name"]').fill('');
+    await setNameFilter(page, '');
     await expect.poll(() => page.locator('loco-treemap svg rect').count()).toBe(initial);
   });
 
   test('switching to the Complexity metric keeps the treemap visible', async ({ page }) => {
     await loadFixture(page);
-    await page.locator('loco-filter-bar .chip', { hasText: 'Complexity' }).click();
+    await selectMetric(page, 'complexity');
     await expect(page.locator('loco-treemap svg rect').first()).toBeVisible();
     const tiles = await page.locator('loco-treemap svg rect').count();
     expect(tiles).toBeGreaterThan(5);

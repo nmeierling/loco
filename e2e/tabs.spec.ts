@@ -17,8 +17,8 @@ test.describe('AST tabs', () => {
     await expandFolder(page, 'state');
   });
 
-  test('the heatmap tab is first, permanent and has no close button', async ({ page }) => {
-    const heatmap = page.locator('header.head .tab', { hasText: 'heatmap' });
+  test('the Overview tab is first, permanent and has no close button', async ({ page }) => {
+    const heatmap = page.locator('header.head .tab', { hasText: 'Overview' });
     await expect(heatmap).toBeVisible();
     await expect(heatmap.locator('.tab-close')).toHaveCount(0);
     // The standalone "ast" nav button is gone.

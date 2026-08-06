@@ -18,7 +18,7 @@ import { AnalysisStore } from '../../core/state/analysis.store';
 import { IgnoreService } from '../../core/services/ignore.service';
 import {
   DirNode,
-  MetricKind,
+  DisplayMetric,
   TreeNode,
   fileCount,
   isDir,
@@ -38,7 +38,7 @@ type EmptyReason =
   | { kind: 'churn-error'; message: string }
   | { kind: 'risk-loading' }
   | { kind: 'risk-error'; message: string }
-  | { kind: 'no-data'; metric: MetricKind };
+  | { kind: 'no-data'; metric: DisplayMetric };
 
 interface TileDatum {
   node: TreeNode;
@@ -68,7 +68,7 @@ interface TileDatum {
             @case ('no-matches') {
               <p class="empty-title">No files match the current filters.</p>
               <p class="empty-hint">
-                Filters are applied across the heatmap, sidebar, and other vizzes.
+                Filters are applied across the Overview, sidebar, and other vizzes.
                 @if (e.userIgnoreCount > 0) {
                   {{ e.userIgnoreCount }} custom ignore
                   {{ e.userIgnoreCount === 1 ? 'pattern is' : 'patterns are' }}
@@ -118,7 +118,7 @@ interface TileDatum {
             }
             @case ('no-data') {
               <p class="empty-title">No {{ e.metric }} values for the visible files.</p>
-              <p class="empty-hint">Try switching the metric in the toolbar.</p>
+              <p class="empty-hint">Try switching the metric in the Files sidebar.</p>
             }
           }
         </div>
@@ -473,7 +473,7 @@ export class TreemapComponent implements AfterViewInit {
     return isFile(t.node) && this.store.selectedPath() === t.node.path;
   }
 
-  private layout(root: DirNode | null, metric: MetricKind, w: number, h: number): TileDatum[] {
+  private layout(root: DirNode | null, metric: DisplayMetric, w: number, h: number): TileDatum[] {
     if (!root || w <= 0 || h <= 0) {
       this.legend.set(null);
       return [];

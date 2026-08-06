@@ -1,5 +1,5 @@
 import { Page, expect, test } from '@playwright/test';
-import { loadFixture, selectViz, showAstTree } from './fixtures';
+import { loadFixture, selectViz, setNameFilter, showAstTree } from './fixtures';
 
 /** Numeric text of the nth cell of each rendered row (commas stripped, em-dash → null). */
 async function columnValues(page: Page, cellIndex: number): Promise<(number | null)[]> {
@@ -52,15 +52,15 @@ test.describe('Metric list viz', () => {
     expect(asc[0]).toBeLessThanOrEqual(desc[0]);
   });
 
-  test('rows follow the toolbar name filter rather than a filter of their own', async ({
+  test('rows follow the sidebar name filter rather than a filter of their own', async ({
     page,
   }) => {
     const before = await page.locator('loco-metric-list .row').count();
-    // The list deliberately has no name/path box — that lives in the toolbar and
+    // The list deliberately has no name/path box — that lives in the Files sidebar and
     // applies to every viz at once.
     await expect(page.locator('loco-metric-list input[type="search"]')).toHaveCount(0);
 
-    await page.locator('loco-filter-bar input[placeholder*="name"]').fill('worker');
+    await setNameFilter(page, 'worker');
     await expect(page.locator('loco-metric-list .row').first()).toBeVisible();
 
     const after = await page.locator('loco-metric-list .row').count();

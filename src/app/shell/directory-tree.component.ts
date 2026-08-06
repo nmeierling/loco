@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, input, signal } f
 import { DecimalPipe } from '@angular/common';
 import { AnalysisStore } from '../core/state/analysis.store';
 import { TabsStore } from '../core/state/tabs.store';
-import { DirNode, MetricKind, TreeNode, isDir, isFile, metricValue } from '../core/models/tree';
+import { DirNode, DisplayMetric, TreeNode, isDir, isFile, metricValue } from '../core/models/tree';
 
 @Component({
   selector: 'loco-tree-node',
@@ -167,7 +167,7 @@ export class TreeNodeComponent {
     return !!f.name;
   });
 
-  readonly metric = computed<MetricKind>(() => this.store.filters().metric);
+  readonly metric = computed<DisplayMetric>(() => this.store.filters().metric);
   readonly rootName = this.store.rootName;
 
   readonly asDir = computed<DirNode | null>(() => {

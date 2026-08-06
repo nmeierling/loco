@@ -3,7 +3,7 @@ import { execSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { FIXTURE_DIR, resetApp } from './fixtures';
+import { FIXTURE_DIR, resetApp, selectMetric } from './fixtures';
 
 /**
  * Builds a tiny git repo in a temporary directory:
@@ -72,10 +72,10 @@ test.describe('Git churn — local .git directory', () => {
     await page.waitForSelector('loco-treemap svg');
     await page.waitForSelector('loco-spinner .overlay', { state: 'hidden' }).catch(() => undefined);
 
-    const chip = page.locator('loco-filter-bar .chip', { hasText: 'Churn' });
-    await expect(chip).toBeVisible();
-    await expect(chip).toBeDisabled();
-    const hint = await chip.getAttribute('title');
+    const churnOption = page.locator('loco-file-browser .metric select option[value="churn"]');
+    // Playwright's toBeDisabled doesn't recognise a disabled <option>, so read the property.
+    expect(await churnOption.evaluate((o) => (o as HTMLOptionElement).disabled)).toBe(true);
+    const hint = await churnOption.getAttribute('title');
     expect(hint ?? '').toMatch(/\.git\/|Chrome|churn/i);
   });
 
@@ -88,10 +88,9 @@ test.describe('Git churn — local .git directory', () => {
     await page.waitForSelector('loco-treemap svg');
     await page.waitForSelector('loco-spinner .overlay', { state: 'hidden' }).catch(() => undefined);
 
-    // The Churn chip should now be visible (it stays hidden when no .git/ is present).
-    const churnChip = page.locator('loco-filter-bar .chip', { hasText: 'Churn' });
-    await expect(churnChip).toBeVisible();
-    await expect(churnChip).toBeEnabled();
+    // The Churn option should now be enabled (it stays disabled when no .git/ is present).
+    const churnOption = page.locator('loco-file-browser .metric select option[value="churn"]');
+    await expect(churnOption).toBeEnabled();
 
     // Hover a tile and confirm Churn is shown in the tooltip once the walk lands.
     await expect
@@ -102,7 +101,7 @@ test.describe('Git churn — local .git directory', () => {
       .toContain('Churn');
 
     // Switch to Churn metric — both source files should have tiles with width>0.
-    await churnChip.click();
+    await selectMetric(page, 'churn');
     await page.waitForTimeout(150);
     const tiles = await page.$$eval('loco-treemap svg rect', (rs) =>
       rs.map((r) => parseFloat(r.getAttribute('width') ?? '0')),
@@ -120,7 +119,7 @@ test.describe('Git churn — local .git directory', () => {
     await page.locator('loco-drop-zone input[type="file"]').setInputFiles(repo);
     await page.waitForSelector('loco-treemap svg');
 
-    const churnChip = page.locator('loco-filter-bar .chip', { hasText: 'Churn' });
+    const churnOption = page.locator('loco-file-browser .metric select option[value="churn"]');
     // Wait for the background walk to land, then let the tree rewrite settle.
     await expect
       .poll(async () => {
@@ -134,8 +133,8 @@ test.describe('Git churn — local .git directory', () => {
     await expect(page.locator('loco-treemap svg rect').first()).toBeVisible();
 
     // The counts came back with the cached tree, so the metric is still selectable.
-    await expect(churnChip).toBeEnabled();
-    await churnChip.click();
+    await expect(churnOption).toBeEnabled();
+    await selectMetric(page, 'churn');
     await page.waitForTimeout(150);
     const tiles = await page.$$eval('loco-treemap svg rect', (rs) =>
       rs.map((r) => parseFloat(r.getAttribute('width') ?? '0')),
@@ -164,9 +163,9 @@ test.describe('Git churn — local .git directory', () => {
 
     // Churn is selectable while pending, and the viz explains itself instead of
     // rendering an empty canvas.
-    const churnChip = page.locator('loco-filter-bar .chip', { hasText: 'Churn' });
-    await expect(churnChip).toBeEnabled();
-    await churnChip.click();
+    const churnOption = page.locator('loco-file-browser .metric select option[value="churn"]');
+    await expect(churnOption).toBeEnabled();
+    await selectMetric(page, 'churn');
     await expect(page.locator('loco-treemap .empty-title')).toHaveText('Walking git history…');
     await expect(page.locator('footer.status')).toContainText('Walking git history');
 

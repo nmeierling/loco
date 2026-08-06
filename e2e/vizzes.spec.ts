@@ -45,14 +45,14 @@ async function dblclickVisibleNode(page: Page): Promise<void> {
 }
 
 test.describe('Alternative vizzes (sunburst, module graph, dep matrix)', () => {
-  test('List leads the viz chips but the treemap is what opens', async ({ page }) => {
+  test('List leads the viz tabs but the treemap is what opens', async ({ page }) => {
     await loadFixture(page);
 
-    const chips = page.locator('loco-filter-bar .group', { hasText: 'viz' }).locator('.chip');
-    await expect(chips.first()).toHaveText('List');
-    await expect(chips.first()).not.toHaveClass(/active/);
+    const tabs = page.locator('loco-viz-switcher .tab');
+    await expect(tabs.first()).toHaveText('List');
+    await expect(tabs.first()).not.toHaveClass(/active/);
     await expect(
-      page.locator('loco-filter-bar .chip.active', { hasText: 'Treemap' }),
+      page.locator('loco-viz-switcher .tab.active', { hasText: 'Treemap' }),
     ).toBeVisible();
     await expect(page.locator('loco-treemap svg')).toBeVisible();
   });

@@ -44,9 +44,35 @@ export async function loadFixture(page: Page): Promise<void> {
   await expect(page.locator('loco-treemap svg rect').first()).toBeVisible();
 }
 
-/** Switches the active viz via the filter bar chip. */
+/** Switches the active viz via the Overview viz-switcher tab. */
 export async function selectViz(page: Page, label: string): Promise<void> {
-  await page.locator('loco-filter-bar .chip', { hasText: label }).click();
+  await page.locator('loco-viz-switcher .tab', { hasText: label }).click();
+}
+
+/** Reveals the Files sidebar name/path filter (a no-op if it is already showing). */
+export async function openFilesFilter(page: Page): Promise<void> {
+  const nameFilter = page.locator('loco-file-browser input[placeholder*="name"]');
+  if (!(await nameFilter.isVisible().catch(() => false))) {
+    await page.locator('loco-file-browser button[aria-label="Filter files"]').click();
+    await expect(nameFilter).toBeVisible();
+  }
+}
+
+/** Selects the displayed metric via the Files sidebar dropdown. */
+export async function selectMetric(page: Page, value: string): Promise<void> {
+  await page.locator('loco-file-browser .metric select').selectOption(value);
+}
+
+/** Sets (or clears) the Files sidebar name filter, revealing the filter row first. */
+export async function setNameFilter(page: Page, value: string): Promise<void> {
+  await openFilesFilter(page);
+  await page.locator('loco-file-browser input[placeholder*="name"]').fill(value);
+}
+
+/** Sets (or clears) the Files sidebar path filter, revealing the filter row first. */
+export async function setPathFilter(page: Page, value: string): Promise<void> {
+  await openFilesFilter(page);
+  await page.locator('loco-file-browser input[placeholder*="path"]').fill(value);
 }
 
 /** Expands a directory tree row by its visible name (climbs the chevron if collapsed). */
@@ -66,7 +92,8 @@ export async function expandFolder(page: Page, name: string): Promise<void> {
  */
 export async function openInAst(page: Page, nameFragment: string): Promise<void> {
   await selectViz(page, 'List');
-  const nameFilter = page.locator('loco-filter-bar input[placeholder*="name"]');
+  await openFilesFilter(page);
+  const nameFilter = page.locator('loco-file-browser input[placeholder*="name"]');
   await nameFilter.fill(nameFragment);
   await page.locator('loco-metric-list .row').first().dblclick();
   await expect(page.locator('loco-ast-view')).toBeVisible();
@@ -74,9 +101,9 @@ export async function openInAst(page: Page, nameFragment: string): Promise<void>
   await nameFilter.fill('');
 }
 
-/** Activates the permanent heatmap tab. */
+/** Activates the permanent Overview tab. */
 export async function showHeatmap(page: Page): Promise<void> {
-  await page.locator('header.head .tab', { hasText: 'heatmap' }).click();
+  await page.locator('header.head .tab', { hasText: 'Overview' }).click();
 }
 
 /**

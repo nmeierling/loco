@@ -14,13 +14,13 @@ import { SessionService } from '../core/services/session.service';
 import { IgnoreService } from '../core/services/ignore.service';
 import { VizRegistry } from '../viz/viz-registry';
 import { LoadResult } from '../core/services/directory-loader.service';
-import { FilterBarComponent } from '../filters/filter-bar.component';
 import { DropZoneComponent } from './drop-zone.component';
 import { SpinnerComponent } from './spinner.component';
-import { DirectoryTreeComponent } from './directory-tree.component';
+import { FileBrowserComponent } from './file-browser.component';
 import { IgnorePanelComponent } from './ignore-panel.component';
 import { MetricsHelpComponent } from './metrics-help.component';
 import { HeatmapPanelComponent } from '../viz/heatmap-panel.component';
+import { VizSwitcherComponent } from '../viz/viz-switcher.component';
 import { AstViewComponent } from '../ast/ast-view.component';
 
 type Side = 'left' | 'right';
@@ -40,13 +40,13 @@ const STORAGE_KEY = 'loco.panels.v1';
   selector: 'loco-shell',
   standalone: true,
   imports: [
-    FilterBarComponent,
     DropZoneComponent,
     SpinnerComponent,
-    DirectoryTreeComponent,
+    FileBrowserComponent,
     IgnorePanelComponent,
     MetricsHelpComponent,
     HeatmapPanelComponent,
+    VizSwitcherComponent,
     AstViewComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -63,7 +63,7 @@ const STORAGE_KEY = 'loco.panels.v1';
           [class.active]="!tabs.isAstActive()"
           (click)="tabs.activateHeatmap()"
         >
-          heatmap
+          Overview
         </button>
         @for (path of tabs.astTabs(); track path) {
           <button
@@ -125,7 +125,6 @@ const STORAGE_KEY = 'loco.panels.v1';
         }
       </section>
     } @else {
-      <loco-filter-bar />
       <div class="body">
         <aside
           class="sidebar left"
@@ -138,13 +137,7 @@ const STORAGE_KEY = 'loco.panels.v1';
               <span class="open-label">Files</span>
             </button>
           } @else {
-            <header class="panel-head">
-              <span class="panel-title">Files</span>
-              <button class="collapse-btn" type="button" (click)="toggle('left')" title="Collapse">
-                ‹
-              </button>
-            </header>
-            <loco-directory-tree />
+            <loco-file-browser (collapse)="toggle('left')" />
             <div
               class="resizer right"
               (mousedown)="startResize('left', $event)"
@@ -155,6 +148,7 @@ const STORAGE_KEY = 'loco.panels.v1';
         </aside>
 
         <main class="viz-area">
+          <loco-viz-switcher [style.display]="tabs.isAstActive() ? 'none' : 'block'" />
           <loco-heatmap-panel [style.display]="tabs.isAstActive() ? 'none' : 'block'" />
           <!-- One view per open tab, kept alive so each remembers its own state (mode,
                page, search, scroll); only the active one is shown. -->
@@ -414,7 +408,7 @@ const STORAGE_KEY = 'loco.panels.v1';
       .sidebar.collapsed {
         cursor: pointer;
       }
-      .sidebar > loco-directory-tree,
+      .sidebar > loco-file-browser,
       .sidebar > loco-ignore-panel {
         flex: 1;
         min-height: 0;
@@ -506,6 +500,13 @@ const STORAGE_KEY = 'loco.panels.v1';
         /* Confine the AST view's sticky, z-indexed tab row to its own stacking context so
            it can't paint over the neighbouring Ignore sidebar. */
         isolation: isolate;
+      }
+      .viz-area > loco-viz-switcher {
+        flex: none;
+      }
+      .viz-area > loco-heatmap-panel {
+        flex: 1;
+        min-height: 0;
       }
       .status {
         border-top: 1px solid var(--border);

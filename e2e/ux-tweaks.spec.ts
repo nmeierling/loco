@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { expandFolder, loadFixture, openInAst, showHeatmap } from './fixtures';
+import { expandFolder, loadFixture, openFilesFilter, openInAst, showHeatmap } from './fixtures';
 
 test.describe('UX tweaks', () => {
   test('treemap shows a color legend in the top-left', async ({ page }) => {
@@ -14,28 +14,33 @@ test.describe('UX tweaks', () => {
     expect(scaleText ?? '').toMatch(/0/);
   });
 
-  test('path filter input has the same width on heatmap and an AST tab', async ({ page }) => {
+  test('the sidebar path filter keeps a stable width across Overview and an AST tab', async ({
+    page,
+  }) => {
     await loadFixture(page);
+    await openFilesFilter(page);
     const widthOf = () =>
-      page.$eval('loco-filter-bar input.search.path', (el) => el.getBoundingClientRect().width);
-    const onHeatmap = await widthOf();
+      page.$eval('loco-file-browser input[placeholder*="path"]', (el) =>
+        el.getBoundingClientRect().width,
+      );
+    const onOverview = await widthOf();
     await openInAst(page, 'app.ts');
     const onAst = await widthOf();
-    expect(Math.round(onHeatmap)).toBe(Math.round(onAst));
+    expect(Math.round(onOverview)).toBe(Math.round(onAst));
   });
 
-  test('an AST tab hides VIZ chips; the heatmap tab shows them', async ({ page }) => {
+  test('an AST tab hides the viz switcher; the Overview tab shows it', async ({ page }) => {
     await loadFixture(page);
-    // On heatmap (default), the VIZ row is visible.
-    await expect(page.locator('loco-filter-bar .group .label', { hasText: 'viz' })).toBeVisible();
+    // On the Overview (default), the viz switcher is visible.
+    await expect(page.locator('loco-viz-switcher')).toBeVisible();
 
     // Open a file in an AST tab
     await openInAst(page, 'app.ts');
-    await expect(page.locator('loco-filter-bar .group .label', { hasText: 'viz' })).toHaveCount(0);
+    await expect(page.locator('loco-viz-switcher')).toBeHidden();
 
-    // Back on the heatmap tab, the VIZ row reappears
+    // Back on the Overview tab, the viz switcher reappears
     await showHeatmap(page);
-    await expect(page.locator('loco-filter-bar .group .label', { hasText: 'viz' })).toBeVisible();
+    await expect(page.locator('loco-viz-switcher')).toBeVisible();
   });
 
   test('the sidebar shows every file, even with an AST tab open', async ({ page }) => {

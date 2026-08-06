@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { loadFixture } from './fixtures';
+import { loadFixture, setNameFilter, setPathFilter } from './fixtures';
 
 test.describe('Sidebar — auto-expand on filter', () => {
   test('typing into the name filter expands all folders so matches are visible', async ({
@@ -17,11 +17,11 @@ test.describe('Sidebar — auto-expand on filter', () => {
     await expect(target).toHaveCount(0);
 
     // Typing "analysis" should expand all folders and reveal the file.
-    await page.locator('loco-filter-bar input[placeholder*="name"]').fill('catalog');
+    await setNameFilter(page, 'catalog');
     await expect(target).toBeVisible();
 
     // Clearing the filter restores the default (collapsed) state.
-    await page.locator('loco-filter-bar input[placeholder*="name"]').fill('');
+    await setNameFilter(page, '');
     await expect(target).toHaveCount(0);
   });
 
@@ -36,7 +36,7 @@ test.describe('Sidebar — auto-expand on filter', () => {
     ).toHaveCount(0);
 
     // Path filter narrows the tree but does not force-expand collapsed folders.
-    await page.locator('loco-filter-bar input.search.path').fill('services');
+    await setPathFilter(page, 'services');
     await page.waitForTimeout(150);
     await expect(
       page.locator('loco-directory-tree .row.file:has(.name:has-text("catalog.service.ts"))'),

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { loadFixture, selectViz } from './fixtures';
+import { loadFixture, selectViz, setPathFilter } from './fixtures';
 
 test.describe('Symbols viz', () => {
   test('lists exported names nothing in the repo references', async ({ page }) => {
@@ -27,9 +27,9 @@ test.describe('Symbols viz', () => {
     await expect(page.locator('loco-symbols-viz .row').first()).toBeVisible();
     const before = await page.locator('loco-symbols-viz .row').count();
 
-    // No filter box of its own — the toolbar's path filter drives it, as everywhere else.
+    // No filter box of its own — the sidebar's path filter drives it, as everywhere else.
     await expect(page.locator('loco-symbols-viz input[type="search"]')).toHaveCount(0);
-    await page.locator('loco-filter-bar input.search.path').fill('app/core/workers');
+    await setPathFilter(page, 'app/core/workers');
 
     await expect.poll(() => page.locator('loco-symbols-viz .row').count()).toBeLessThan(before);
     const paths = await page.locator('loco-symbols-viz .group-head .path').allTextContents();

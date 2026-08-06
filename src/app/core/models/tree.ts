@@ -1,4 +1,11 @@
+/** Numeric metrics stored per file. */
 export type MetricKind = 'loc' | 'complexity' | 'churn' | 'risk';
+
+/**
+ * What to show next to a file/folder and drive the vizzes by. Adds `count` (number of
+ * files) on top of the stored per-file metrics — it is derived from the tree, not stored.
+ */
+export type DisplayMetric = MetricKind | 'count';
 
 export interface FileMetrics {
   loc: number | null;
@@ -46,7 +53,9 @@ export function walk(node: TreeNode, visit: (n: TreeNode) => void): void {
   }
 }
 
-export function metricValue(n: TreeNode, metric: MetricKind): number {
+export function metricValue(n: TreeNode, metric: DisplayMetric): number {
+  // `count` is the number of files in the subtree — a file is 1, a folder the sum.
+  if (metric === 'count') return fileCount(n);
   if (isDir(n)) {
     let sum = 0;
     for (const c of n.children) sum += metricValue(c, metric);

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { expandFolder, loadFixture, selectViz } from './fixtures';
+import { expandFolder, loadFixture, selectViz, setPathFilter } from './fixtures';
 
 test.describe('Path filter — sidebar funnel + viz-wide application', () => {
   test('funnel icon on a directory row sets the path filter', async ({ page }) => {
@@ -12,7 +12,8 @@ test.describe('Path filter — sidebar funnel + viz-wide application', () => {
     const dirRow = page.locator('loco-directory-tree .row.dir', { hasText: 'services' }).first();
     await dirRow.locator('.filter-btn').click({ force: true });
 
-    const pathInput = page.locator('loco-filter-bar input.search.path');
+    // Setting the path filter pins the filter row open, so the input shows the value.
+    const pathInput = page.locator('loco-file-browser input[placeholder*="path"]');
     await expect(pathInput).toHaveValue(/services/);
   });
 
@@ -22,7 +23,7 @@ test.describe('Path filter — sidebar funnel + viz-wide application', () => {
     await loadFixture(page);
 
     const initial = await page.locator('loco-treemap svg rect').count();
-    await page.locator('loco-filter-bar input.search.path').fill('app/core');
+    await setPathFilter(page, 'app/core');
     await expect.poll(() => page.locator('loco-treemap svg rect').count()).toBeLessThan(initial);
 
     // Sanity: at least one tile is now wider than tall (aspect-ratio change took effect).
@@ -42,7 +43,7 @@ test.describe('Path filter — sidebar funnel + viz-wide application', () => {
     await page.waitForSelector('loco-module-graph svg circle');
 
     const before = await page.locator('loco-module-graph svg circle').count();
-    await page.locator('loco-filter-bar input.search.path').fill('app/core/services');
+    await setPathFilter(page, 'app/core/services');
     await expect
       .poll(() => page.locator('loco-module-graph svg circle').count())
       .toBeLessThan(before);
@@ -55,7 +56,7 @@ test.describe('Path filter — sidebar funnel + viz-wide application', () => {
     await selectViz(page, 'Dep matrix');
     await page.waitForSelector('loco-dependency-matrix svg rect');
 
-    await page.locator('loco-filter-bar input.search.path').fill('app/core/services');
+    await setPathFilter(page, 'app/core/services');
 
     // Folder mode splits the biggest bucket until the grid is worth reading, so a
     // narrow filter drills all the way down to files. Every row must come from the
@@ -71,10 +72,10 @@ test.describe('Path filter — sidebar funnel + viz-wide application', () => {
     await loadFixture(page);
     const initial = await page.locator('loco-treemap svg rect').count();
 
-    await page.locator('loco-filter-bar input.search.path').fill('app/core');
+    await setPathFilter(page, 'app/core');
     await expect.poll(() => page.locator('loco-treemap svg rect').count()).toBeLessThan(initial);
 
-    await page.locator('loco-filter-bar button.clear').click();
+    await page.locator('loco-file-browser button[title="Clear path filter"]').click();
     await expect.poll(() => page.locator('loco-treemap svg rect').count()).toBe(initial);
   });
 });
