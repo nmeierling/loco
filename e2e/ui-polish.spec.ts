@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { loadFixture, selectViz } from './fixtures';
+import { loadFixture, openGearMenu, selectViz } from './fixtures';
 
 test.describe('UI polish', () => {
   test('treemap tooltip flips to the left instead of shrinking at the right edge', async ({
@@ -70,7 +70,8 @@ test.describe('UI polish', () => {
     await loadFixture(page);
     await expect(page.locator('loco-metrics-help')).toHaveCount(0);
 
-    await page.locator('loco-shell .help').click();
+    await openGearMenu(page);
+    await page.locator('loco-shell .menu-item', { hasText: 'How the metrics' }).click();
     const dialog = page.locator('loco-metrics-help [role="dialog"]');
     await expect(dialog).toBeVisible();
     await expect(dialog).toContainText('Churn');
@@ -83,7 +84,8 @@ test.describe('UI polish', () => {
     await expect(page.locator('loco-metrics-help')).toHaveCount(0);
 
     // Clicking the backdrop also dismisses it.
-    await page.locator('loco-shell .help').click();
+    await openGearMenu(page);
+    await page.locator('loco-shell .menu-item', { hasText: 'How the metrics' }).click();
     await page.locator('loco-metrics-help .backdrop').click({ position: { x: 5, y: 5 } });
     await expect(page.locator('loco-metrics-help')).toHaveCount(0);
   });

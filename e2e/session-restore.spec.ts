@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import {
   FIXTURE_ROOT_NAME,
   loadFixture,
+  openGearMenu,
   openInAst,
   resetApp,
   selectMetric,
@@ -18,11 +19,13 @@ test.describe('Session survives a reload', () => {
 
     await expect(page.locator('loco-drop-zone')).toHaveCount(0);
     await expect(page.locator('loco-treemap svg rect').first()).toBeVisible();
-    await expect(page.locator('loco-shell .root-name')).toHaveText(FIXTURE_ROOT_NAME);
+    // The folder name now labels the pinned first tab rather than the top-right corner.
+    await expect(page.locator('loco-shell .tab.overview')).toHaveText(FIXTURE_ROOT_NAME);
     // The same corpus came back, not a fresh (empty) read.
     await expect.poll(() => page.locator('loco-treemap svg rect').count()).toBe(tiles);
-    // The header says this is a cached copy rather than a fresh read.
-    await expect(page.locator('loco-shell .cache')).toContainText('cached');
+    // The gear menu says this is a cached copy rather than a fresh read.
+    await openGearMenu(page);
+    await expect(page.locator('loco-shell .menu-cache')).toContainText('cached');
   });
 
   test('filters, metric and the active viz come back too', async ({ page }) => {
@@ -65,7 +68,11 @@ test.describe('Session survives a reload', () => {
 
   test('change folder wipes the cache so the next reload starts clean', async ({ page }) => {
     await loadFixture(page);
-    await page.locator('loco-shell .ghost', { hasText: 'change folder' }).click();
+    await openGearMenu(page);
+    await page.locator('loco-shell .menu-item', { hasText: 'Change folder' }).click();
+    // Changing folders ends the session, so it asks for confirmation first.
+    await expect(page.locator('loco-shell .confirm')).toBeVisible();
+    await page.locator('loco-shell .confirm .btn.danger').click();
     await expect(page.locator('loco-drop-zone')).toBeVisible();
 
     await page.reload();
@@ -76,6 +83,7 @@ test.describe('Session survives a reload', () => {
   test('a first visit with no cache goes straight to the drop zone', async ({ page }) => {
     await resetApp(page);
     await expect(page.locator('loco-drop-zone')).toBeVisible();
-    await expect(page.locator('loco-shell .cache')).toHaveCount(0);
+    // No project loaded → no gear menu (and so no cache indicator) in the header.
+    await expect(page.locator('loco-shell .gear')).toHaveCount(0);
   });
 });

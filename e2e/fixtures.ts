@@ -101,9 +101,15 @@ export async function openInAst(page: Page, nameFragment: string): Promise<void>
   await nameFilter.fill('');
 }
 
-/** Activates the permanent Overview tab. */
+/** Activates the permanent first tab (labelled with the project folder name). */
 export async function showHeatmap(page: Page): Promise<void> {
-  await page.locator('header.head .tab', { hasText: 'Overview' }).click();
+  await page.locator('header.head .tab.overview').click();
+}
+
+/** Opens the top-right gear menu (help, cache status, change folder). */
+export async function openGearMenu(page: Page): Promise<void> {
+  await page.locator('loco-shell .gear').click();
+  await page.locator('loco-shell .menu').waitFor();
 }
 
 /**

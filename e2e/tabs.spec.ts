@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { expandFolder, loadFixture, showHeatmap } from './fixtures';
+import { FIXTURE_ROOT_NAME, expandFolder, loadFixture, showHeatmap } from './fixtures';
 
 /** Double-clicks a fixture file in the sidebar tree, opening it in an AST tab. */
 async function openTreeFile(page: import('@playwright/test').Page, name: string): Promise<void> {
@@ -18,8 +18,10 @@ test.describe('AST tabs', () => {
   });
 
   test('the Overview tab is first, permanent and has no close button', async ({ page }) => {
-    const heatmap = page.locator('header.head .tab', { hasText: 'Overview' });
+    // The first tab is pinned and now labelled with the project folder name.
+    const heatmap = page.locator('header.head .tab.overview');
     await expect(heatmap).toBeVisible();
+    await expect(heatmap).toHaveText(FIXTURE_ROOT_NAME);
     await expect(heatmap.locator('.tab-close')).toHaveCount(0);
     // The standalone "ast" nav button is gone.
     await expect(page.locator('header.head .tab', { hasText: 'ast' })).toHaveCount(0);

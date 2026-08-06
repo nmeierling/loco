@@ -70,8 +70,9 @@ const STORAGE_KEY = 'loco.panels.v1';
           class="tab overview"
           [class.active]="!tabs.isAstActive()"
           (click)="tabs.activateHeatmap()"
+          [title]="store.rootName() || 'Overview'"
         >
-          Overview
+          <span class="tab-name">{{ store.rootName() || 'Overview' }}</span>
         </button>
         @if (tabs.astTabs().length) {
           <div class="tab-scroll-wrap">
@@ -120,16 +121,7 @@ const STORAGE_KEY = 'loco.panels.v1';
         }
       </nav>
       @if (store.root(); as r) {
-        <div class="root">
-          <button
-            type="button"
-            class="help"
-            (click)="helpOpen.set(true)"
-            title="How the metrics are measured"
-            aria-label="How the metrics are measured"
-          >
-            ?
-          </button>
+        <div class="tools">
           @if (gitUnavailable()) {
             <span
               class="git-warn"
@@ -142,13 +134,88 @@ const STORAGE_KEY = 'loco.panels.v1';
               >⚠</span
             >
           }
-          @if (cacheNote(); as note) {
-            <span class="cache" [class.warn]="note.warn" [title]="note.title">{{
-              note.label
-            }}</span>
+          <button
+            type="button"
+            class="gear"
+            [class.active]="menuOpen()"
+            (click)="menuOpen.set(!menuOpen())"
+            title="Menu"
+            aria-label="Menu"
+            aria-haspopup="menu"
+            [attr.aria-expanded]="menuOpen()"
+          >
+            <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+              <path
+                fill="currentColor"
+                d="M8 5.2A2.8 2.8 0 1 0 8 10.8 2.8 2.8 0 0 0 8 5.2Zm0 1.5a1.3 1.3 0 1 1 0 2.6 1.3 1.3 0 0 1 0-2.6Z"
+              />
+              <path
+                fill="currentColor"
+                d="M6.9.9h2.2l.35 1.72c.4.14.78.36 1.12.63l1.66-.57 1.1 1.9-1.3 1.18c.04.21.06.42.06.64s-.02.43-.06.64l1.3 1.18-1.1 1.9-1.66-.57c-.34.27-.72.49-1.12.63L9.1 15.1H6.9l-.35-1.72a4.3 4.3 0 0 1-1.12-.63l-1.66.57-1.1-1.9 1.3-1.18A4.4 4.4 0 0 1 3.2 8c0-.22.02-.43.06-.64L1.96 6.18l1.1-1.9 1.66.57c.34-.27.72-.49 1.12-.63L6.9.9Z"
+              />
+            </svg>
+          </button>
+
+          @if (menuOpen()) {
+            <div class="menu-backdrop" (click)="menuOpen.set(false)"></div>
+            <div class="menu" role="menu">
+              <div class="menu-head">
+                <div class="menu-folder-row">
+                  <span class="menu-folder" [title]="store.rootName()">{{ store.rootName() }}</span>
+                  <button
+                    type="button"
+                    class="copy-path"
+                    (click)="copyPath()"
+                    [title]="pathCopied() ? 'Copied!' : 'Copy folder path'"
+                    aria-label="Copy folder path"
+                  >
+                    @if (pathCopied()) {
+                      <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+                        <path
+                          d="M3.5 8.5l3 3 6-6.5"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.6"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        />
+                      </svg>
+                    } @else {
+                      <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+                        <rect
+                          x="4.2"
+                          y="3.2"
+                          width="8"
+                          height="10.6"
+                          rx="1.4"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.3"
+                        />
+                        <path
+                          d="M6.2 3.2V2.4A1.2 1.2 0 0 1 7.4 1.2h1.6A1.2 1.2 0 0 1 10.2 2.4v0.8"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.3"
+                        />
+                      </svg>
+                    }
+                  </button>
+                </div>
+                @if (cacheNote(); as note) {
+                  <span class="menu-cache" [class.warn]="note.warn" [title]="note.title">{{
+                    note.label
+                  }}</span>
+                }
+              </div>
+              <button type="button" class="menu-item" role="menuitem" (click)="openHelp()">
+                How the metrics are measured
+              </button>
+              <button type="button" class="menu-item" role="menuitem" (click)="changeFolder()">
+                Change folder…
+              </button>
+            </div>
           }
-          <span class="root-name" [title]="store.rootName()">{{ store.rootName() }}</span>
-          <button class="ghost" type="button" (click)="reset()">change folder</button>
         </div>
       }
     </header>
@@ -248,6 +315,31 @@ const STORAGE_KEY = 'loco.panels.v1';
 
     @if (helpOpen()) {
       <loco-metrics-help (closed)="helpOpen.set(false)" />
+    }
+
+    @if (confirmChangeOpen()) {
+      <div class="confirm-backdrop" (click)="confirmChangeOpen.set(false)">
+        <div
+          class="confirm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="confirm-change-title"
+          (click)="$event.stopPropagation()"
+        >
+          <h2 id="confirm-change-title">Change folder?</h2>
+          <p>
+            This ends the current session. Open tabs, filters and the cached copy of
+            <strong>{{ store.rootName() }}</strong> will be cleared, and you'll return to the
+            folder picker.
+          </p>
+          <div class="confirm-actions">
+            <button type="button" class="btn" (click)="confirmChangeOpen.set(false)">Cancel</button>
+            <button type="button" class="btn danger" (click)="confirmChangeFolder()">
+              Change folder
+            </button>
+          </div>
+        </div>
+      </div>
     }
   `,
   styles: [
@@ -416,31 +508,38 @@ const STORAGE_KEY = 'loco.panels.v1';
         opacity: 1;
         color: var(--danger);
       }
-      .root {
+      /* Top-right cluster: the git warning (if any) and the gear menu. */
+      .tools {
         margin-left: auto;
+        position: relative;
         display: flex;
         align-items: center;
         gap: 8px;
+        flex-shrink: 0;
       }
-      .root-name {
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        font-size: 12px;
-        max-width: 320px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .ghost {
+      .gear {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px;
+        height: 26px;
+        border-radius: 4px;
         border: 1px solid var(--border);
         background: transparent;
         color: inherit;
-        padding: 3px 8px;
-        border-radius: 3px;
-        font-size: 11px;
+        padding: 0;
         cursor: pointer;
-        font-family: inherit;
+        opacity: 0.7;
+        flex-shrink: 0;
+        /* Stay above the dismiss backdrop so a second click toggles the menu shut. */
+        position: relative;
+        z-index: 42;
       }
-      .ghost:hover {
+      .gear:hover,
+      .gear.active {
+        opacity: 1;
+        border-color: var(--accent);
+        color: var(--accent);
         background: var(--hover);
       }
       .welcome {
@@ -466,26 +565,6 @@ const STORAGE_KEY = 'loco.panels.v1';
         opacity: 0.7;
         font-size: 13px;
       }
-      .help {
-        width: 18px;
-        height: 18px;
-        border-radius: 50%;
-        border: 1px solid var(--border);
-        background: transparent;
-        color: inherit;
-        font: inherit;
-        font-size: 11px;
-        line-height: 1;
-        padding: 0;
-        cursor: pointer;
-        opacity: 0.55;
-        flex-shrink: 0;
-      }
-      .help:hover {
-        opacity: 1;
-        border-color: var(--accent);
-        color: var(--accent);
-      }
       .git-warn {
         font-size: 13px;
         line-height: 1;
@@ -493,19 +572,149 @@ const STORAGE_KEY = 'loco.panels.v1';
         cursor: default;
         flex-shrink: 0;
       }
-      .cache {
-        font-size: 10px;
-        opacity: 0.5;
-        border: 1px solid var(--border);
-        border-radius: 3px;
-        padding: 1px 6px;
-        white-space: nowrap;
-        cursor: default;
+      /* Transparent catch so a click anywhere else dismisses the gear menu. */
+      .menu-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 40;
       }
-      .cache.warn {
+      .menu {
+        position: absolute;
+        top: calc(100% + 6px);
+        right: 0;
+        z-index: 41;
+        min-width: 220px;
+        background: var(--bar-bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
+        padding: 4px;
+        display: flex;
+        flex-direction: column;
+      }
+      .menu-head {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        padding: 6px 8px 8px;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 4px;
+      }
+      .menu-folder-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .menu-folder {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+        font-weight: 600;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        flex: 1;
+        min-width: 0;
+      }
+      .copy-path {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 22px;
+        border-radius: 4px;
+        border: 1px solid var(--border);
+        background: transparent;
+        color: inherit;
+        padding: 0;
+        cursor: pointer;
+        opacity: 0.7;
+        flex-shrink: 0;
+      }
+      .copy-path:hover {
+        opacity: 1;
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .menu-cache {
+        font-size: 10px;
+        opacity: 0.6;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .menu-cache.warn {
         color: var(--danger);
-        border-color: color-mix(in srgb, var(--danger) 40%, transparent);
-        opacity: 0.8;
+        opacity: 0.85;
+      }
+      .menu-item {
+        text-align: left;
+        background: transparent;
+        border: none;
+        color: inherit;
+        font: inherit;
+        font-size: 12px;
+        padding: 7px 8px;
+        border-radius: 4px;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .menu-item:hover {
+        background: var(--hover);
+      }
+      .confirm-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 60;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        background: color-mix(in srgb, var(--bg) 65%, transparent);
+        backdrop-filter: blur(2px);
+      }
+      .confirm {
+        background: var(--bar-bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+        max-width: 400px;
+        width: 100%;
+        padding: 18px 20px 16px;
+      }
+      .confirm h2 {
+        margin: 0 0 8px;
+        font-size: 15px;
+      }
+      .confirm p {
+        margin: 0 0 16px;
+        font-size: 12.5px;
+        line-height: 1.55;
+        opacity: 0.9;
+      }
+      .confirm-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+      .btn {
+        border: 1px solid var(--border);
+        background: transparent;
+        color: inherit;
+        padding: 5px 14px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-family: inherit;
+        cursor: pointer;
+      }
+      .btn:hover {
+        background: var(--hover);
+      }
+      .btn.danger {
+        border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+        color: var(--danger);
+      }
+      .btn.danger:hover {
+        background: color-mix(in srgb, var(--danger) 15%, transparent);
       }
       .body {
         flex: 1;
@@ -652,6 +861,13 @@ export class ShellComponent {
   private readonly destroyRef = inject(DestroyRef);
   readonly errorMessage = signal<string | null>(null);
   readonly helpOpen = signal(false);
+  /** Whether the top-right gear menu (help, cache status, change folder) is open. */
+  readonly menuOpen = signal(false);
+  /** Whether the "change folder?" confirmation dialog is showing — it ends the session. */
+  readonly confirmChangeOpen = signal(false);
+  /** Briefly true after the folder path is copied, to confirm on the clipboard button. */
+  readonly pathCopied = signal(false);
+  private copiedTimer: ReturnType<typeof setTimeout> | null = null;
   /** True while Shift is held — turns a tab click into "close this tab". */
   readonly shiftHeld = signal(false);
 
@@ -822,6 +1038,10 @@ export class ShellComponent {
         this.updateTabOverflow();
       });
     });
+
+    this.destroyRef.onDestroy(() => {
+      if (this.copiedTimer) clearTimeout(this.copiedTimer);
+    });
   }
 
   /** Recomputes whether the file-tab strip can scroll further left / right. */
@@ -939,6 +1159,44 @@ export class ShellComponent {
     this.ig.clearUserPatterns();
     this.errorMessage.set(null);
     void this.session.discard();
+  }
+
+  /** Gear-menu: open the metrics help dialog. */
+  openHelp(): void {
+    this.menuOpen.set(false);
+    this.helpOpen.set(true);
+  }
+
+  /** Gear-menu: ask before dropping the project — changing folders ends the session. */
+  changeFolder(): void {
+    this.menuOpen.set(false);
+    this.confirmChangeOpen.set(true);
+  }
+
+  /** Confirmed: drop the current project and return to the folder picker. */
+  confirmChangeFolder(): void {
+    this.confirmChangeOpen.set(false);
+    this.reset();
+  }
+
+  /**
+   * Gear-menu: copy the project's folder path to the clipboard. Browsers only expose the
+   * folder name (not an absolute filesystem path) to web apps, so that is what we copy.
+   * Keeps the menu open and flips the icon to a check for a moment as confirmation.
+   */
+  copyPath(): void {
+    const text = this.store.rootName();
+    if (!text || !navigator.clipboard) return;
+    navigator.clipboard
+      .writeText(text)
+      .then(() => {
+        this.pathCopied.set(true);
+        if (this.copiedTimer) clearTimeout(this.copiedTimer);
+        this.copiedTimer = setTimeout(() => this.pathCopied.set(false), 1400);
+      })
+      .catch(() => {
+        // Clipboard access can be denied; the button simply does not confirm.
+      });
   }
 
   /** Shift-click closes the tab; a plain click just activates it. */
