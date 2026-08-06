@@ -28,18 +28,20 @@ interface MemberUse {
   count: number;
 }
 
-/** An external symbol (from a third-party import) and the sites in this file that use it. */
-interface ExtMember {
+/**
+ * One external (third-party) symbol keyed by its fully-qualified name — the package/module
+ * plus the imported class/symbol — and the call/read sites in this file that reference it.
+ * Grouping by FQN rather than by package keeps `org.neo4j.driver.Driver` and
+ * `org.neo4j.driver.Session` as separate rows instead of nesting under one `org.neo4j.driver`.
+ */
+interface ExtGroup {
+  key: string;
+  /** Package (JVM) or bare module specifier (JS/TS) the symbol comes from. */
+  module: string;
+  /** The imported class/symbol name — the trailing segment of the FQN. */
   imported: string;
   refs: ExternalRef[];
   count: number;
-}
-
-/** A third-party dependency (module/package) and the symbols this file pulls from it. */
-interface ExtGroup {
-  module: string;
-  count: number;
-  members: ExtMember[];
 }
 
 /** The class (or top-level unit / module scope) a set of usages is grouped under. */
@@ -127,6 +129,13 @@ const MAX_REFS = 300;
           />
         </div>
 
+        @if (allKeys().length > 0) {
+          <button type="button" class="expand-all" (click)="toggleAll()">
+            <span class="chev">{{ allOpen() ? '▾' : '▸' }}</span>
+            {{ allOpen() ? 'Collapse all' : 'Expand all' }}
+          </button>
+        }
+
         @if (dir() === 'self') {
           @if (self().length === 0) {
             <div class="note">
@@ -163,45 +172,27 @@ const MAX_REFS = 300;
           @if (external().length === 0) {
             <div class="note">This file imports nothing from outside the repository.</div>
           }
-          @for (g of external(); track g.module) {
+          @for (g of external(); track g.key) {
             <div class="grp">
-              <button type="button" class="grp-head" (click)="toggle('ext|' + g.module)">
-                <span class="chev">{{ isOpen('ext|' + g.module) ? '▾' : '▸' }}</span>
+              <button type="button" class="grp-head" (click)="toggle(g.key)">
+                <span class="chev">{{ isOpen(g.key) ? '▾' : '▸' }}</span>
                 <span class="kind" data-kind="module">dep</span>
-                <span class="name">{{ g.module }}</span>
+                <span class="name">{{ g.imported }}</span>
+                <span class="from">{{ g.module }}</span>
                 <span class="badge">{{ g.count }}×</span>
               </button>
-              @if (isOpen('ext|' + g.module)) {
-                <div class="members">
-                  @for (m of g.members; track m.imported) {
-                    <div class="mem">
-                      <button
-                        type="button"
-                        class="mem-head"
-                        (click)="toggle('ext|' + g.module + '|' + m.imported)"
-                      >
-                        <span class="chev">{{
-                          isOpen('ext|' + g.module + '|' + m.imported) ? '▾' : '▸'
-                        }}</span>
-                        <span class="name">{{ m.imported }}</span>
-                        <span class="badge">{{ m.count }}×</span>
-                      </button>
-                      @if (isOpen('ext|' + g.module + '|' + m.imported)) {
-                        <div class="refs">
-                          @for (r of m.refs; track r.row + ':' + r.col) {
-                            <button type="button" class="ref" (click)="jumpExt(r)">
-                              <span class="ref-line">{{ r.row + 1 }}</span>
-                              <span class="ref-kind" [attr.data-kind]="r.kind">{{ r.kind }}</span>
-                              <code>{{ r.line }}</code>
-                            </button>
-                          }
-                          @if (m.count > m.refs.length) {
-                            <div class="note small">
-                              Showing the first {{ m.refs.length }} of {{ m.count }} references.
-                            </div>
-                          }
-                        </div>
-                      }
+              @if (isOpen(g.key)) {
+                <div class="refs">
+                  @for (r of g.refs; track r.row + ':' + r.col) {
+                    <button type="button" class="ref" (click)="jumpExt(r)">
+                      <span class="ref-line">{{ r.row + 1 }}</span>
+                      <span class="ref-kind" [attr.data-kind]="r.kind">{{ r.kind }}</span>
+                      <code>{{ r.line }}</code>
+                    </button>
+                  }
+                  @if (g.count > g.refs.length) {
+                    <div class="note small">
+                      Showing the first {{ g.refs.length }} of {{ g.count }} references.
                     </div>
                   }
                 </div>
@@ -231,43 +222,25 @@ const MAX_REFS = 300;
                 <div class="members">
                   @for (m of g.members; track m.def.id) {
                     <div class="mem">
-                      <button
-                        type="button"
-                        class="mem-head"
-                        (click)="toggle(g.key + '|' + m.def.id)"
-                      >
-                        <span class="chev">{{ isOpen(g.key + '|' + m.def.id) ? '▾' : '▸' }}</span>
+                      <button type="button" class="mem-head" (click)="jumpToDef(m.def)">
                         <span class="kind" [attr.data-kind]="m.def.kind">{{ m.def.kind }}</span>
                         <span class="name">{{ qualified(m.def) }}</span>
                         <span class="badge">{{ m.count }}×</span>
                       </button>
-                      @if (isOpen(g.key + '|' + m.def.id)) {
-                        <div class="refs">
-                          @if (dir() === 'outgoing') {
-                            <button
-                              type="button"
-                              class="ref definition"
-                              (click)="jumpToDef(m.def)"
-                            >
-                              <span class="ref-line">{{ m.def.startRow + 1 }}</span>
-                              <span class="ref-kind" data-kind="def">definition</span>
-                              <code>{{ m.def.path }}</code>
-                            </button>
-                          }
-                          @for (r of m.refs; track r.path + ':' + r.row + ':' + r.col) {
-                            <button type="button" class="ref" (click)="jump(r)">
-                              <span class="ref-line">{{ r.row + 1 }}</span>
-                              <span class="ref-kind" [attr.data-kind]="r.kind">{{ r.kind }}</span>
-                              <code>{{ r.line }}</code>
-                            </button>
-                          }
-                          @if (m.count > m.refs.length) {
-                            <div class="note small">
-                              Showing the first {{ m.refs.length }} of {{ m.count }} references.
-                            </div>
-                          }
-                        </div>
-                      }
+                      <div class="refs">
+                        @for (r of m.refs; track r.path + ':' + r.row + ':' + r.col) {
+                          <button type="button" class="ref" (click)="jump(r)">
+                            <span class="ref-line">{{ r.row + 1 }}</span>
+                            <span class="ref-kind" [attr.data-kind]="r.kind">{{ r.kind }}</span>
+                            <code>{{ r.line }}</code>
+                          </button>
+                        }
+                        @if (m.count > m.refs.length) {
+                          <div class="note small">
+                            Showing the first {{ m.refs.length }} of {{ m.count }} references.
+                          </div>
+                        }
+                      </div>
                     </div>
                   }
                 </div>
@@ -377,6 +350,26 @@ const MAX_REFS = 300;
       }
       .tabs button:hover:not(.active) {
         background: var(--hover);
+      }
+      .expand-all {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        width: 100%;
+        text-align: left;
+        background: transparent;
+        border: none;
+        border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+        color: inherit;
+        font: inherit;
+        font-size: 11px;
+        opacity: 0.75;
+        padding: 4px 8px;
+        cursor: pointer;
+      }
+      .expand-all:hover {
+        background: var(--hover);
+        opacity: 1;
       }
       .grp,
       .sym {
@@ -504,9 +497,6 @@ const MAX_REFS = 300;
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-      .ref.definition code {
-        color: var(--accent);
-      }
     `,
   ],
 })
@@ -566,6 +556,8 @@ export class UsagesPanelComponent {
     const groups = new Map<string, { unit: Unit; members: Map<string, MemberUse> }>();
     for (const def of idx.defsByPath.get(path) ?? []) {
       for (const ref of idx.refsByDef.get(def.id) ?? []) {
+        // Import and definition rows are hidden — only call/read sites are usages here.
+        if (ref.kind === 'import') continue;
         // Only usages from *other* files count as incoming — same-file usage is "self".
         if (ref.path === path) continue;
         // Skip references coming from files the user has ignored.
@@ -591,6 +583,8 @@ export class UsagesPanelComponent {
     const ignored = this.ignoredPath();
     const groups = new Map<string, { unit: Unit; members: Map<string, MemberUse> }>();
     for (const ref of idx.refsByPath.get(path) ?? []) {
+      // Import and definition rows are hidden — only call/read sites are usages here.
+      if (ref.kind === 'import') continue;
       const target = idx.defsById.get(ref.defId);
       // Only targets that live in another file are outgoing.
       if (!target || target.path === path) continue;
@@ -609,6 +603,8 @@ export class UsagesPanelComponent {
     const q = this.query().trim().toLowerCase();
     const byDef = new Map<string, MemberUse>();
     for (const ref of idx.refsByPath.get(path) ?? []) {
+      // Import and definition rows are hidden — only call/read sites are usages here.
+      if (ref.kind === 'import') continue;
       const target = idx.defsById.get(ref.defId);
       if (!target || target.path !== path) continue;
       let m = byDef.get(target.id);
@@ -631,40 +627,55 @@ export class UsagesPanelComponent {
     this.dir() === 'incoming' ? this.incoming() : this.outgoing(),
   );
 
-  /** Third-party dependencies this file imports, grouped by module then by symbol. */
+  /**
+   * Third-party symbols this file calls or reads, one row per fully-qualified name
+   * (package/module + imported class). Import-only rows are dropped; the call/read sites
+   * hang directly off each FQN so the first expand reveals them.
+   */
   readonly external = computed<ExtGroup[]>(() => {
     const idx = this.index.index();
     if (!idx) return [];
     const q = this.query().trim().toLowerCase();
-    const groups = new Map<string, Map<string, ExtMember>>();
+    const groups = new Map<string, ExtGroup>();
     for (const r of idx.externalByPath.get(this.path()) ?? []) {
-      let g = groups.get(r.module);
+      // Only call/read sites — the bare import line is not a usage.
+      if (r.kind === 'import') continue;
+      const key = `${r.module} ${r.imported}`;
+      let g = groups.get(key);
       if (!g) {
-        g = new Map();
-        groups.set(r.module, g);
+        g = { key, module: r.module, imported: r.imported, refs: [], count: 0 };
+        groups.set(key, g);
       }
-      let m = g.get(r.imported);
-      if (!m) {
-        m = { imported: r.imported, refs: [], count: 0 };
-        g.set(r.imported, m);
-      }
-      m.count++;
-      if (m.refs.length < MAX_REFS) m.refs.push(r);
+      g.count++;
+      if (g.refs.length < MAX_REFS) g.refs.push(r);
     }
-    const out: ExtGroup[] = [];
-    for (const [module, members] of groups) {
-      let mem = [...members.values()].sort(
-        (a, b) => b.count - a.count || a.imported.localeCompare(b.imported),
+    let out = [...groups.values()];
+    if (q) {
+      out = out.filter(
+        (g) => g.module.toLowerCase().includes(q) || g.imported.toLowerCase().includes(q),
       );
-      if (q) {
-        if (!module.toLowerCase().includes(q)) {
-          mem = mem.filter((m) => m.imported.toLowerCase().includes(q));
-          if (mem.length === 0) continue;
-        }
-      }
-      out.push({ module, count: mem.reduce((s, m) => s + m.count, 0), members: mem });
     }
-    return out.sort((a, b) => b.count - a.count || a.module.localeCompare(b.module));
+    return out.sort(
+      (a, b) =>
+        b.count - a.count ||
+        a.module.localeCompare(b.module) ||
+        a.imported.localeCompare(b.imported),
+    );
+  });
+
+  /** Toggle keys for every top-level row in the current tab — drives "Expand/Collapse all". */
+  readonly allKeys = computed<string[]>(() => {
+    const d = this.dir();
+    if (d === 'self') return this.self().map((m) => 'self|' + m.def.id);
+    if (d === 'external') return this.external().map((g) => g.key);
+    return this.groups().map((g) => g.key);
+  });
+
+  /** True when every current-tab row is expanded — flips the button to "Collapse all". */
+  readonly allOpen = computed<boolean>(() => {
+    const keys = this.allKeys();
+    const open = this.open();
+    return keys.length > 0 && keys.every((k) => open.has(k));
   });
 
   /** The class (or top-level symbol) a declaration is grouped under. */
@@ -718,6 +729,20 @@ export class UsagesPanelComponent {
     this.open.update((set) => {
       const next = new Set(set);
       if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  }
+
+  /** Expand every row in the current tab, or collapse them all if they're already open. */
+  toggleAll(): void {
+    const keys = this.allKeys();
+    const collapse = this.allOpen();
+    this.open.update((set) => {
+      const next = new Set(set);
+      for (const k of keys) {
+        if (collapse) next.delete(k);
+        else next.add(k);
+      }
       return next;
     });
   }
