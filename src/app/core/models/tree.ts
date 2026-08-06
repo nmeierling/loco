@@ -2,10 +2,11 @@
 export type MetricKind = 'loc' | 'complexity' | 'churn' | 'risk';
 
 /**
- * What to show next to a file/folder and drive the vizzes by. Adds `count` (number of
- * files) on top of the stored per-file metrics — it is derived from the tree, not stored.
+ * What to show next to a file/folder and drive the vizzes by. On top of the stored
+ * per-file metrics it adds two derived metrics, computed from the tree rather than
+ * stored: `count` (number of files) and `size` (bytes on disk, summed for folders).
  */
-export type DisplayMetric = MetricKind | 'count';
+export type DisplayMetric = MetricKind | 'count' | 'size';
 
 export interface FileMetrics {
   loc: number | null;
@@ -56,11 +57,13 @@ export function walk(node: TreeNode, visit: (n: TreeNode) => void): void {
 export function metricValue(n: TreeNode, metric: DisplayMetric): number {
   // `count` is the number of files in the subtree — a file is 1, a folder the sum.
   if (metric === 'count') return fileCount(n);
+  // Folders aggregate every other metric (including `size`) by summing their files.
   if (isDir(n)) {
     let sum = 0;
     for (const c of n.children) sum += metricValue(c, metric);
     return sum;
   }
+  if (metric === 'size') return n.size;
   const v = n.metrics[metric];
   return v ?? 0;
 }
@@ -70,4 +73,25 @@ export function fileCount(n: TreeNode): number {
   let total = 0;
   for (const c of n.children) total += fileCount(c);
   return total;
+}
+
+/**
+ * Renders a metric value for display next to a file/folder. `size` is a byte count, so
+ * it gets K/M/G abbreviations; every other metric is a plain count.
+ */
+export function formatMetricValue(value: number, metric: DisplayMetric): string {
+  if (metric === 'size') return formatSize(value);
+  return Math.round(value).toLocaleString();
+}
+
+/**
+ * Human-readable byte size using decimal abbreviations — K (thousand), M (mega),
+ * G (giga). Two digits after the decimal point for gigabytes, none for the rest.
+ */
+export function formatSize(bytes: number): string {
+  const n = Math.max(0, bytes);
+  if (n >= 1e9) return `${(n / 1e9).toFixed(2)} G`;
+  if (n >= 1e6) return `${Math.round(n / 1e6).toLocaleString()} M`;
+  if (n >= 1e3) return `${Math.round(n / 1e3).toLocaleString()} K`;
+  return `${Math.round(n)} B`;
 }

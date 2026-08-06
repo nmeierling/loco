@@ -15,9 +15,11 @@ import { FormsModule } from '@angular/forms';
 import { TabsStore } from '../../core/state/tabs.store';
 import { AnalysisStore } from '../../core/state/analysis.store';
 import { IgnoreService } from '../../core/services/ignore.service';
-import { FileNode, MetricKind, TreeNode, fileCount, isFile } from '../../core/models/tree';
+import { FileNode, MetricKind, TreeNode, fileCount, formatSize, isFile } from '../../core/models/tree';
 
-type SortKey = 'name' | 'dir' | 'language' | MetricKind;
+/** Numeric columns: the stored metrics plus the derived `size`. */
+type NumKey = MetricKind | 'size';
+type SortKey = 'name' | 'dir' | 'language' | NumKey;
 type SortDir = 1 | -1;
 
 interface Column {
@@ -37,6 +39,7 @@ interface Row {
   complexity: number | null;
   churn: number | null;
   risk: number | null;
+  size: number;
 }
 
 interface CellView {
@@ -490,6 +493,10 @@ export class MetricListComponent {
         width: '118px',
         align: 'right',
       });
+      // Size sits next to LOC — the two "how big is this file" numbers read well together.
+      if (m === 'loc') {
+        cols.push({ key: 'size', label: 'Size', numeric: true, width: '96px', align: 'right' });
+      }
     }
     return cols;
   });
@@ -544,13 +551,14 @@ export class MetricListComponent {
   });
 
   /** Column maxima, for the in-cell magnitude bars. Recomputed from the visible rows. */
-  private readonly maxima = computed<Record<MetricKind, number>>(() => {
-    const max: Record<MetricKind, number> = { loc: 0, complexity: 0, churn: 0, risk: 0 };
+  private readonly maxima = computed<Record<NumKey, number>>(() => {
+    const max: Record<NumKey, number> = { loc: 0, complexity: 0, churn: 0, risk: 0, size: 0 };
     for (const r of this.rows()) {
       for (const m of METRICS) {
         const v = r[m];
         if (v !== null && v > max[m]) max[m] = v;
       }
+      if (r.size > max.size) max.size = r.size;
     }
     return max;
   });
@@ -698,29 +706,31 @@ function toRow(f: FileNode): Row {
     complexity: f.metrics.complexity,
     churn: f.metrics.churn,
     risk: f.metrics.risk,
+    size: f.size,
   };
 }
 
 function cellView(
   r: Row,
   c: Column,
-  max: Record<MetricKind, number>,
+  max: Record<NumKey, number>,
   churnPending: boolean,
 ): CellView {
   if (!c.numeric) {
     const raw = c.key === 'name' ? r.name : c.key === 'dir' ? r.dir : (r.language ?? '—');
     return { key: c.key, numeric: false, text: raw, pct: 0 };
   }
-  const metric = c.key as MetricKind;
+  const metric = c.key as NumKey;
   const v = r[metric];
   const m = max[metric];
   // An empty churn cell means "not computed yet" while the walk is running, which
   // reads differently from "this file has no commits".
   const missing = metric === 'churn' && churnPending ? '…' : '—';
+  const text = v === null ? missing : metric === 'size' ? formatSize(v) : v.toLocaleString();
   return {
     key: c.key,
     numeric: true,
-    text: v === null ? missing : v.toLocaleString(),
+    text,
     pct: v === null || m <= 0 ? 0 : (v / m) * 100,
   };
 }

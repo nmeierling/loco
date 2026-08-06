@@ -2,11 +2,14 @@ import {
   ChangeDetectionStrategy,
   Component,
   DestroyRef,
+  ElementRef,
   computed,
   effect,
   inject,
   signal,
+  viewChild,
 } from '@angular/core';
+import { Title } from '@angular/platform-browser';
 import { AnalysisService } from '../core/services/analysis.service';
 import { AnalysisStore } from '../core/state/analysis.store';
 import { TabsStore } from '../core/state/tabs.store';
@@ -53,36 +56,67 @@ const STORAGE_KEY = 'loco.panels.v1';
   template: `
     <header class="head">
       <div class="brand">
+        <svg class="mark" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="1.5" y="1.5" width="21" height="21" rx="5" fill="var(--accent)" />
+          <rect x="6" y="6.6" width="12" height="2.4" rx="1.2" fill="var(--accent-fg)" />
+          <rect x="6" y="10.8" width="7.5" height="2.4" rx="1.2" fill="var(--accent-fg)" opacity="0.8" />
+          <rect x="6" y="15" width="10" height="2.4" rx="1.2" fill="var(--accent-fg)" opacity="0.6" />
+        </svg>
         <span class="logo">loco</span>
-        <span class="tag">lines of code, visualized</span>
       </div>
       <nav class="nav">
         <button
           type="button"
-          class="tab"
+          class="tab overview"
           [class.active]="!tabs.isAstActive()"
           (click)="tabs.activateHeatmap()"
         >
           Overview
         </button>
-        @for (path of tabs.astTabs(); track path) {
-          <button
-            type="button"
-            class="tab file"
-            [class.active]="tabs.activePath() === path"
-            [class.closing]="shiftHeld()"
-            (click)="onTabClick($event, path)"
-            [title]="shiftHeld() ? 'Click to close' : path"
-          >
-            <span class="tab-name">{{ tabLabel(path) }}</span>
-            <span
-              class="tab-close"
-              role="button"
-              aria-label="Close tab"
-              (click)="closeTab($event, path)"
-              >×</span
+        @if (tabs.astTabs().length) {
+          <div class="tab-scroll-wrap">
+            <div class="tab-scroll" #tabScroll (scroll)="onTabsScroll()">
+              @for (path of tabs.astTabs(); track path) {
+                <button
+                  type="button"
+                  class="tab file"
+                  [class.active]="tabs.activePath() === path"
+                  [class.closing]="shiftHeld()"
+                  (click)="onTabClick($event, path)"
+                  [title]="shiftHeld() ? 'Click to close' : path"
+                >
+                  <span
+                    class="tab-close"
+                    role="button"
+                    aria-label="Close tab"
+                    (click)="closeTab($event, path)"
+                    >×</span
+                  >
+                  <span class="tab-name">{{ tabLabel(path) }}</span>
+                </button>
+              }
+            </div>
+            <button
+              type="button"
+              class="more start"
+              [class.show]="!tabsAtStart()"
+              (click)="scrollTabs(-1)"
+              aria-label="Scroll tabs left"
+              title="More tabs"
             >
-          </button>
+              …
+            </button>
+            <button
+              type="button"
+              class="more end"
+              [class.show]="!tabsAtEnd()"
+              (click)="scrollTabs(1)"
+              aria-label="Scroll tabs right"
+              title="More tabs"
+            >
+              …
+            </button>
+          </div>
         }
       </nav>
       @if (store.root(); as r) {
@@ -91,11 +125,23 @@ const STORAGE_KEY = 'loco.panels.v1';
             type="button"
             class="help"
             (click)="helpOpen.set(true)"
-            title="How churn and risk are measured"
-            aria-label="How churn and risk are measured"
+            title="How the metrics are measured"
+            aria-label="How the metrics are measured"
           >
             ?
           </button>
+          @if (gitUnavailable()) {
+            <span
+              class="git-warn"
+              [title]="
+                'Git history (.git/) is not available for this folder, so churn and risk cannot ' +
+                'be computed. Drop a folder containing a .git/ directory in a Chromium-based ' +
+                'browser to enable them.'
+              "
+              aria-label="Git data unavailable"
+              >⚠</span
+            >
+          }
           @if (cacheNote(); as note) {
             <span class="cache" [class.warn]="note.warn" [title]="note.title">{{
               note.label
@@ -222,23 +268,86 @@ const STORAGE_KEY = 'loco.panels.v1';
       }
       .brand {
         display: flex;
-        align-items: baseline;
+        align-items: center;
         gap: 8px;
+      }
+      .mark {
+        display: block;
+        flex-shrink: 0;
       }
       .logo {
         font-weight: 700;
         font-size: 16px;
-      }
-      .tag {
-        opacity: 0.5;
-        font-size: 11px;
       }
       .nav {
         display: flex;
         gap: 4px;
         align-items: center;
         min-width: 0;
+      }
+      /* Overview is pinned; only the file tabs to its right scroll. */
+      .tab.overview {
+        flex-shrink: 0;
+      }
+      .tab-scroll-wrap {
+        position: relative;
+        display: flex;
+        min-width: 0;
+        flex: 0 1 auto;
+      }
+      .tab-scroll {
+        display: flex;
+        gap: 4px;
+        align-items: center;
+        min-width: 0;
         overflow-x: auto;
+        scroll-behavior: smooth;
+        /* Hide the scrollbar — overflow is signalled by the … affordances instead. */
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+      }
+      .tab-scroll::-webkit-scrollbar {
+        display: none;
+      }
+      /* A "…" pill fades in over whichever edge has more tabs off-screen; click to page.
+         Both stay mounted and toggle via .show so the strip can scroll under them without
+         detaching the button mid-interaction. */
+      .more {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        display: flex;
+        align-items: center;
+        border: none;
+        color: inherit;
+        font: inherit;
+        font-size: 14px;
+        letter-spacing: 1px;
+        line-height: 1;
+        padding: 0 6px;
+        cursor: pointer;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.12s ease;
+        z-index: 1;
+      }
+      .more.show {
+        opacity: 0.75;
+        pointer-events: auto;
+      }
+      .more.show:hover {
+        opacity: 1;
+        color: var(--accent);
+      }
+      .more.start {
+        left: 0;
+        padding-right: 16px;
+        background: linear-gradient(to right, var(--bar-bg) 55%, transparent);
+      }
+      .more.end {
+        right: 0;
+        padding-left: 16px;
+        background: linear-gradient(to left, var(--bar-bg) 55%, transparent);
       }
       .tab {
         display: inline-flex;
@@ -255,6 +364,7 @@ const STORAGE_KEY = 'loco.panels.v1';
         cursor: pointer;
         white-space: nowrap;
         max-width: 360px;
+        flex-shrink: 0;
       }
       .tab:hover {
         opacity: 1;
@@ -277,12 +387,17 @@ const STORAGE_KEY = 'loco.panels.v1';
         width: 15px;
         height: 15px;
         border-radius: 3px;
-        opacity: 0.55;
+        /* Hidden until the tab is hovered, then sits before the name (leading × ). */
+        opacity: 0;
         font-size: 13px;
         line-height: 1;
         flex-shrink: 0;
+        transition: opacity 0.1s;
       }
-      .tab-close:hover {
+      .tab:hover .tab-close {
+        opacity: 0.55;
+      }
+      .tab .tab-close:hover {
         opacity: 1;
         background: color-mix(in srgb, var(--danger) 30%, transparent);
       }
@@ -370,6 +485,13 @@ const STORAGE_KEY = 'loco.panels.v1';
         opacity: 1;
         border-color: var(--accent);
         color: var(--accent);
+      }
+      .git-warn {
+        font-size: 13px;
+        line-height: 1;
+        color: #e0a800;
+        cursor: default;
+        flex-shrink: 0;
       }
       .cache {
         font-size: 10px;
@@ -526,11 +648,18 @@ export class ShellComponent {
   private readonly analysis = inject(AnalysisService);
   private readonly ig = inject(IgnoreService);
   private readonly registry = inject(VizRegistry);
+  private readonly titleService = inject(Title);
   private readonly destroyRef = inject(DestroyRef);
   readonly errorMessage = signal<string | null>(null);
   readonly helpOpen = signal(false);
   /** True while Shift is held — turns a tab click into "close this tab". */
   readonly shiftHeld = signal(false);
+
+  /** The horizontally scrolling strip of file tabs (absent until at least one is open). */
+  private readonly tabScroll = viewChild<ElementRef<HTMLDivElement>>('tabScroll');
+  /** Whether the file-tab strip is scrolled to its start / end — drives the … affordances. */
+  readonly tabsAtStart = signal(true);
+  readonly tabsAtEnd = signal(true);
 
   readonly collapsedWidth = COLLAPSED_WIDTH;
 
@@ -553,6 +682,16 @@ export class ShellComponent {
         'from when it was analysed — re-pick the folder to see changes made since.',
       warn: false,
     };
+  });
+
+  /**
+   * True once a project is loaded but its `.git/` history is missing — either it was not
+   * in the upload or the browser stripped it. Surfaces a warning glyph in the header.
+   */
+  readonly gitUnavailable = computed<boolean>(() => {
+    if (!this.store.root()) return false;
+    const s = this.store.churn().status;
+    return s === 'unavailable' || s === 'error';
   });
 
   /** Coarse clock so the cached-at label ages without a per-second re-render. */
@@ -628,6 +767,12 @@ export class ShellComponent {
       this.session.setViz(this.registry.selectedId());
     });
 
+    // Reflect the open project (the folder shown top-right) in the browser tab title.
+    effect(() => {
+      const name = this.store.rootName();
+      this.titleService.setTitle(name ? `${name} — loco` : 'loco');
+    });
+
     const tick = setInterval(() => this.now.set(Date.now()), 60_000);
     this.destroyRef.onDestroy(() => clearInterval(tick));
 
@@ -651,6 +796,70 @@ export class ShellComponent {
         // ignore quota / private mode errors
       }
     });
+
+    // Keep the … overflow affordances in sync as the strip is resized by the window.
+    const ro = new ResizeObserver(() => this.updateTabOverflow());
+    this.destroyRef.onDestroy(() => ro.disconnect());
+    effect((onCleanup) => {
+      const el = this.tabScroll()?.nativeElement;
+      if (!el) {
+        this.tabsAtStart.set(true);
+        this.tabsAtEnd.set(true);
+        return;
+      }
+      ro.observe(el);
+      onCleanup(() => ro.unobserve(el));
+    });
+
+    // Opening, closing or switching tabs changes the strip's content width and which tab
+    // is active — remeasure and reveal the active tab once the DOM has laid out.
+    effect(() => {
+      this.tabs.astTabs();
+      this.tabs.activePath();
+      this.tabScroll();
+      requestAnimationFrame(() => {
+        this.scrollActiveTabIntoView();
+        this.updateTabOverflow();
+      });
+    });
+  }
+
+  /** Recomputes whether the file-tab strip can scroll further left / right. */
+  private updateTabOverflow(): void {
+    const el = this.tabScroll()?.nativeElement;
+    if (!el) {
+      this.tabsAtStart.set(true);
+      this.tabsAtEnd.set(true);
+      return;
+    }
+    const max = el.scrollWidth - el.clientWidth;
+    this.tabsAtStart.set(el.scrollLeft <= 1);
+    this.tabsAtEnd.set(el.scrollLeft >= max - 1);
+  }
+
+  onTabsScroll(): void {
+    this.updateTabOverflow();
+  }
+
+  /** Pages the file-tab strip by ~70% of its width in the given direction. */
+  scrollTabs(dir: -1 | 1): void {
+    const el = this.tabScroll()?.nativeElement;
+    if (!el) return;
+    el.scrollBy({ left: dir * el.clientWidth * 0.7, behavior: 'smooth' });
+  }
+
+  /** Nudges the active file tab into view when it opens off the edge of the strip. */
+  private scrollActiveTabIntoView(): void {
+    const el = this.tabScroll()?.nativeElement;
+    const active = el?.querySelector<HTMLElement>('.tab.file.active');
+    if (!el || !active) return;
+    const strip = el.getBoundingClientRect();
+    const tab = active.getBoundingClientRect();
+    if (tab.left < strip.left) {
+      el.scrollLeft -= strip.left - tab.left + 12;
+    } else if (tab.right > strip.right) {
+      el.scrollLeft += tab.right - strip.right + 12;
+    }
   }
 
   toggle(side: Side): void {

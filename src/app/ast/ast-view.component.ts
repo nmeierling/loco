@@ -260,7 +260,6 @@ export class AstNodeComponent {
                 Usages
               </button>
             </div>
-            <span class="caption">{{ caption() }}</span>
           }
         </header>
         <ng-template #previewBar>
@@ -447,11 +446,6 @@ export class AstNodeComponent {
       }
       .spacer {
         flex: 1;
-      }
-      .caption {
-        opacity: 0.6;
-        font-size: 11px;
-        margin-left: auto;
       }
       .modes {
         display: flex;
@@ -730,17 +724,6 @@ export class AstViewComponent {
   }
 
   readonly mode = signal<'tree' | 'graph' | 'usages'>('usages');
-
-  readonly caption = computed(() => {
-    switch (this.mode()) {
-      case 'tree':
-        return 'Click an AST node to jump to source.';
-      case 'graph':
-        return 'Click a symbol to expand its callers and callees, and open it.';
-      default:
-        return 'Click a usage to open that file at the line.';
-    }
-  });
 
   private content(): Content | null {
     const s = this.state();

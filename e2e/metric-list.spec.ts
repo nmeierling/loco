@@ -15,9 +15,9 @@ async function columnValues(page: Page, cellIndex: number): Promise<(number | nu
   );
 }
 
-/** Column order without churn (src/ has no .git): File, Folder, Lang, LOC, Complexity. */
+/** Column order without churn (src/ has no .git): File, Folder, Lang, LOC, Size, Complexity. */
 const LOC_COL = 3;
-const COMPLEXITY_COL = 4;
+const COMPLEXITY_COL = 5;
 
 test.describe('Metric list viz', () => {
   test.beforeEach(async ({ page }) => {

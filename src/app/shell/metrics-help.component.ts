@@ -1,9 +1,9 @@
 import { ChangeDetectionStrategy, Component, output } from '@angular/core';
 
 /**
- * Explains the two metrics that are not self-evident. LOC and complexity are read
- * straight off the file; churn and risk are derived, computed at different times, and
- * carry caveats worth stating once in full rather than cramming into a tooltip.
+ * Explains the metrics that are not self-evident. LOC and file size speak for themselves;
+ * complexity, churn and risk are derived, computed at different times, and carry caveats
+ * worth stating once in full rather than cramming into a tooltip.
  */
 @Component({
   selector: 'loco-metrics-help',
@@ -19,9 +19,35 @@ import { ChangeDetectionStrategy, Component, output } from '@angular/core';
         (click)="$event.stopPropagation()"
       >
         <header>
-          <h2 id="metrics-help-title">How churn and risk are measured</h2>
+          <h2 id="metrics-help-title">How the metrics are measured</h2>
           <button type="button" class="close" (click)="closed.emit()" aria-label="Close">×</button>
         </header>
+
+        <section>
+          <h3>Complexity</h3>
+          <p>
+            An approximation of cyclomatic complexity: how many independent paths run through a
+            file, which tracks how hard it is to follow and to test — not how long it is. Every
+            file starts at <strong>1</strong>, and loco adds one for each branching construct it
+            finds by scanning the text.
+          </p>
+          <ul>
+            <li>
+              Counted keywords: <code>if</code> / <code>else if</code>, <code>for</code>,
+              <code>foreach</code>, <code>while</code>, <code>case</code> / <code>when</code>,
+              <code>switch</code>, <code>catch</code> / <code>except</code>, <code>try</code> — plus
+              the operators <code>&amp;&amp;</code>, <code>||</code>, <code>??</code>,
+              <code>?.</code> and the ternary <code>?:</code>.
+            </li>
+            <li>
+              It is a lightweight text scan, not a full parse, so it is an estimate: a keyword in a
+              comment or string can nudge the count up. It works on any text file.
+            </li>
+            <li>
+              It sums up the tree, so a folder's score is the total of the files beneath it.
+            </li>
+          </ul>
+        </section>
 
         <section>
           <h3>Churn</h3>
@@ -57,7 +83,7 @@ import { ChangeDetectionStrategy, Component, output } from '@angular/core';
             edited.
           </p>
           <ul>
-            <li><strong>Complexity</strong> — branching in the file, from its syntax tree.</li>
+            <li><strong>Complexity</strong> — how much the file branches (see above).</li>
             <li><strong>Fan-in</strong> — how many other files import it.</li>
             <li><strong>Churn</strong> — how often it changes.</li>
           </ul>

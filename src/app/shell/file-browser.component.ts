@@ -269,6 +269,7 @@ export class FileBrowserComponent {
   readonly metrics: MetricOption[] = [
     { id: 'count', label: 'File count' },
     { id: 'loc', label: 'LOC' },
+    { id: 'size', label: 'File size' },
     { id: 'complexity', label: 'Complexity' },
     { id: 'churn', label: 'Churn' },
     { id: 'risk', label: 'Risk' },

@@ -1,13 +1,20 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
-import { DecimalPipe } from '@angular/common';
 import { AnalysisStore } from '../core/state/analysis.store';
 import { TabsStore } from '../core/state/tabs.store';
-import { DirNode, DisplayMetric, TreeNode, isDir, isFile, metricValue } from '../core/models/tree';
+import {
+  DirNode,
+  DisplayMetric,
+  TreeNode,
+  formatMetricValue,
+  isDir,
+  isFile,
+  metricValue,
+} from '../core/models/tree';
 
 @Component({
   selector: 'loco-tree-node',
   standalone: true,
-  imports: [DecimalPipe],
+  imports: [],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (asDir(); as dir) {
@@ -34,7 +41,7 @@ import { DirNode, DisplayMetric, TreeNode, isDir, isFile, metricValue } from '..
             </svg>
           </button>
         }
-        <span class="meta">{{ value() | number }}</span>
+        <span class="meta">{{ display() }}</span>
       </div>
       @if (expanded()) {
         <div class="children" [style.padding-left.px]="indent">
@@ -54,7 +61,7 @@ import { DirNode, DisplayMetric, TreeNode, isDir, isFile, metricValue } from '..
         <span class="chev"></span>
         <span class="icon">📄</span>
         <span class="name">{{ f.name }}</span>
-        <span class="meta">{{ value() | number }}</span>
+        <span class="meta">{{ display() }}</span>
       </div>
     }
   `,
@@ -180,6 +187,7 @@ export class TreeNodeComponent {
   });
 
   readonly value = computed(() => metricValue(this.node(), this.metric()));
+  readonly display = computed(() => formatMetricValue(this.value(), this.metric()));
 
   readonly isSelected = computed(() => {
     const n = this.node();
