@@ -31,7 +31,7 @@ test.describe('AST tabs', () => {
     await expect(tab).toBeVisible();
     await expect(tab).toHaveClass(/active/);
     await expect(page.locator('loco-ast-view')).toBeVisible();
-    await expect(page.locator('loco-ast-view .path')).toHaveText(/catalog\.service\.ts$/);
+    await expect(page.locator('loco-ast-view:visible .path')).toHaveText(/catalog\.service\.ts$/);
   });
 
   test('a second file opens a second tab; tabs switch views', async ({ page }) => {
@@ -40,11 +40,11 @@ test.describe('AST tabs', () => {
     await expect(page.locator('header.head .tab.file')).toHaveCount(2);
 
     // The second tab is active and showing its file.
-    await expect(page.locator('loco-ast-view .path')).toHaveText(/catalog\.store\.ts$/);
+    await expect(page.locator('loco-ast-view:visible .path')).toHaveText(/catalog\.store\.ts$/);
 
     // Click back to the first tab.
     await page.locator('header.head .tab.file', { hasText: 'catalog.service.ts' }).click();
-    await expect(page.locator('loco-ast-view .path')).toHaveText(/catalog\.service\.ts$/);
+    await expect(page.locator('loco-ast-view:visible .path')).toHaveText(/catalog\.service\.ts$/);
   });
 
   test('double-clicking an already-open file focuses its tab, no duplicate', async ({ page }) => {
@@ -52,7 +52,7 @@ test.describe('AST tabs', () => {
     await openTreeFile(page, 'catalog.store.ts');
     await openTreeFile(page, 'catalog.service.ts');
     await expect(page.locator('header.head .tab.file')).toHaveCount(2);
-    await expect(page.locator('loco-ast-view .path')).toHaveText(/catalog\.service\.ts$/);
+    await expect(page.locator('loco-ast-view:visible .path')).toHaveText(/catalog\.service\.ts$/);
   });
 
   test('closing the active tab activates a neighbour', async ({ page }) => {
@@ -66,7 +66,23 @@ test.describe('AST tabs', () => {
 
     await expect(page.locator('header.head .tab.file')).toHaveCount(1);
     // The left neighbour becomes active.
-    await expect(page.locator('loco-ast-view .path')).toHaveText(/catalog\.service\.ts$/);
+    await expect(page.locator('loco-ast-view:visible .path')).toHaveText(/catalog\.service\.ts$/);
+  });
+
+  test('each tab remembers its own editor state when switching', async ({ page }) => {
+    await openTreeFile(page, 'catalog.service.ts');
+    // Tab A opens on Usages (symbol-indexed); switch it to Tree.
+    await page.locator('loco-ast-view:visible .mode', { hasText: 'Tree' }).click();
+    await expect(page.locator('loco-ast-view:visible loco-ast-node').first()).toBeVisible();
+    await expect(page.locator('loco-ast-view:visible .mode.active')).toHaveText('Tree');
+
+    // Tab B opens fresh on Usages, leaving A untouched.
+    await openTreeFile(page, 'catalog.store.ts');
+    await expect(page.locator('loco-ast-view:visible .mode.active')).toHaveText('Usages');
+
+    // Returning to A shows Tree again — its state survived the switch.
+    await page.locator('header.head .tab.file', { hasText: 'catalog.service.ts' }).click();
+    await expect(page.locator('loco-ast-view:visible .mode.active')).toHaveText('Tree');
   });
 
   test('shift-clicking a tab closes it', async ({ page }) => {
@@ -118,6 +134,6 @@ test.describe('AST tabs', () => {
       page.locator('header.head .tab.file', { hasText: 'catalog.store.ts' }),
     ).toBeVisible();
     // Heatmap was active when saved, so it comes back active.
-    await expect(page.locator('loco-ast-view')).toBeHidden();
+    await expect(page.locator('loco-ast-view:visible')).toHaveCount(0);
   });
 });

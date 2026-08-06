@@ -1,5 +1,6 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { AnalysisStore } from './analysis.store';
+import type { AstRange } from '../../ast/ast-selection.service';
 
 /**
  * Drives the shell's tab bar. The heatmap is a permanent, implicit tab (represented by
@@ -20,11 +21,29 @@ export class TabsStore {
 
   readonly isAstActive = computed(() => this.activePath() !== null);
 
+  /**
+   * A cross-file jump target. Each tab keeps its own selection, so a jump can't hand the
+   * range to the destination directly — it parks it here for that tab's AST view to claim,
+   * whether the tab is brand new or already open.
+   */
+  readonly pendingRange = signal<{ path: string; range: AstRange } | null>(null);
+
   /** Opens `path` in a new tab, or focuses its existing tab. */
   openFile(path: string): void {
     if (!this.astTabs().includes(path)) this.astTabs.update((t) => [...t, path]);
     this.activePath.set(path);
     this.store.selectPath(path);
+  }
+
+  /** Opens (or focuses) a tab for `path` and asks its AST view to reveal `range`. */
+  openFileAt(path: string, range: AstRange): void {
+    this.pendingRange.set({ path, range });
+    this.openFile(path);
+  }
+
+  /** Called by an AST view once it has applied the pending jump. */
+  consumePending(): void {
+    this.pendingRange.set(null);
   }
 
   activateHeatmap(): void {
@@ -54,6 +73,7 @@ export class TabsStore {
   clear(): void {
     this.astTabs.set([]);
     this.activePath.set(null);
+    this.pendingRange.set(null);
   }
 
   /** Restores persisted tabs on session reload. `active` is honoured only if still open. */

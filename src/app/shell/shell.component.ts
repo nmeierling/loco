@@ -156,10 +156,14 @@ const STORAGE_KEY = 'loco.panels.v1';
 
         <main class="viz-area">
           <loco-heatmap-panel [style.display]="tabs.isAstActive() ? 'none' : 'block'" />
-          <loco-ast-view
-            [path]="tabs.activePath()"
-            [style.display]="tabs.isAstActive() ? 'flex' : 'none'"
-          />
+          <!-- One view per open tab, kept alive so each remembers its own state (mode,
+               page, search, scroll); only the active one is shown. -->
+          @for (path of tabs.astTabs(); track path) {
+            <loco-ast-view
+              [path]="path"
+              [style.display]="tabs.activePath() === path ? 'flex' : 'none'"
+            />
+          }
         </main>
 
         <aside

@@ -45,14 +45,16 @@ test.describe('AST usages panel', () => {
     await expect(page.locator('loco-usages-panel .sym-head').first()).toBeVisible();
     await page.locator('loco-usages-panel .sym-head', { hasText: 'selectProduct' }).first().click();
 
-    const before = await page.locator('loco-ast-view .path').textContent();
+    const before = await page.locator('loco-ast-view:visible .path').textContent();
     const target = page.locator('loco-usages-panel .ref').first();
     const lineNo = (await target.locator('.ref-line').textContent())?.trim();
     await target.click();
 
-    await expect.poll(() => page.locator('loco-ast-view .path').textContent()).not.toBe(before);
+    await expect
+      .poll(() => page.locator('loco-ast-view:visible .path').textContent())
+      .not.toBe(before);
     // The source pane highlights the exact line the usage sits on.
-    const highlighted = page.locator('loco-source-panel .row.highlighted');
+    const highlighted = page.locator('loco-ast-view:visible loco-source-panel .row.highlighted');
     await expect(highlighted.first()).toBeVisible();
     const num = await highlighted.first().locator('.num').textContent();
     expect(num?.trim()).toBe(lineNo);
@@ -88,9 +90,11 @@ test.describe('AST usages panel', () => {
     await expect(target).toHaveAttribute('title', /catalog\.store\.ts:\d+/);
     await target.click();
 
-    await expect(page.locator('loco-ast-view .path')).toHaveText('app/core/state/catalog.store.ts');
+    await expect(page.locator('loco-ast-view:visible .path')).toHaveText(
+      'app/core/state/catalog.store.ts',
+    );
     // Landed on the declaration itself, not just the file.
-    const highlighted = page.locator('loco-source-panel .row.highlighted');
+    const highlighted = page.locator('loco-ast-view:visible loco-source-panel .row.highlighted');
     await expect(highlighted.first()).toBeVisible();
     await expect(highlighted.first()).toContainText('selectProduct');
   });
@@ -119,7 +123,7 @@ test.describe('AST usages panel', () => {
 
     // Clicking a caller navigates to it.
     await callers.filter({ hasText: 'bootstrap' }).first().click();
-    await expect(page.locator('loco-ast-view .path')).toHaveText('app/app.ts');
+    await expect(page.locator('loco-ast-view:visible .path')).toHaveText('app/app.ts');
   });
 
   test('a file with no grammar opens as an editor-only preview, no mode buttons', async ({

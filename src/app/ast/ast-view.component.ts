@@ -181,6 +181,8 @@ export class AstNodeComponent {
     SymbolGraphComponent,
     UsagesPanelComponent,
   ],
+  // Per-view selection so every open tab keeps its own highlight and scroll target.
+  providers: [AstSelectionService],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @switch (state().kind) {
@@ -613,6 +615,16 @@ export class AstViewComponent {
       const target = Math.floor(r.startRow / PREVIEW_MAX_LINES);
       if (target !== this.page() && target < this.pageCount()) this.page.set(target);
     });
+
+    // Claim a cross-file jump parked for this tab — works whether the tab was just opened
+    // or was already sitting in the background.
+    effect(() => {
+      const p = this.tabs.pendingRange();
+      if (p && p.path === this.path()) {
+        this.selection.setRange(p.range);
+        this.tabs.consumePending();
+      }
+    });
   }
 
   /** Whether the whole-file search bar applies — text we can scan line by line. */
@@ -708,9 +720,6 @@ export class AstViewComponent {
 
   private setReady(path: string, content: Content): void {
     this.state.set({ kind: 'ready', path, content });
-    // A cross-file jump parked its target range while this file was loading.
-    const pending = this.selection.takePending(path);
-    if (pending) this.selection.setRange(pending);
   }
 
   readonly mode = signal<'tree' | 'graph' | 'usages'>('usages');

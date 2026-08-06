@@ -52,6 +52,11 @@ interface RenderLink {
 
 /** Cap on drawn nodes — a folder seed on a hot module can fan out fast. */
 const MAX_NODES = 400;
+const MIN_ZOOM = 0.2;
+const MAX_ZOOM = 5;
+const MINIMAP_W = 190;
+const MINIMAP_H = 130;
+const MINIMAP_PAD = 8;
 
 @Component({
   selector: 'loco-symbol-graph',
@@ -69,7 +74,12 @@ const MAX_NODES = 400;
           </button>
         </div>
         @if (status() === 'ready') {
-          <span class="hint">{{ nodes().length }} symbols · click a node to expand & open</span>
+          <div class="seg zoomctl" role="group" aria-label="Zoom">
+            <button type="button" (click)="zoomBy(1 / 1.2)" title="Zoom out">−</button>
+            <button type="button" (click)="fitView()" title="Fit graph to view">Fit</button>
+            <button type="button" (click)="zoomBy(1.2)" title="Zoom in">+</button>
+          </div>
+          <span class="hint">{{ nodes().length }} symbols · click to expand · drag to move</span>
         }
       </div>
 
@@ -82,42 +92,91 @@ const MAX_NODES = 400;
       } @else if (status() === 'empty') {
         <div class="placeholder">No calls or usages involve the symbols in this {{ scope() }}.</div>
       } @else if (status() === 'ready' && width() > 0 && height() > 0) {
-        <svg [attr.width]="width()" [attr.height]="height()">
-          <g class="links">
-            @for (l of links(); track $index) {
-              <line
-                [attr.x1]="l.x1"
-                [attr.y1]="l.y1"
-                [attr.x2]="l.x2"
-                [attr.y2]="l.y2"
-                stroke="rgba(128,128,128,0.4)"
-                stroke-width="0.9"
-                marker-end="url(#sg-arrow)"
-              />
-            }
-          </g>
-          <g class="nodes">
-            @for (n of nodes(); track n.id) {
-              <g [attr.transform]="'translate(' + n.cx + ',' + n.cy + ')'" class="node" (click)="onClick(n)">
-                <circle
-                  [attr.r]="n.r"
-                  [attr.fill]="n.fill"
-                  [attr.stroke]="n.current ? 'var(--fg)' : 'rgba(0,0,0,0.4)'"
-                  [attr.stroke-width]="n.current ? 1.6 : 0.6"
-                  [attr.opacity]="n.focused ? 1 : 0.85"
+        <svg
+          [attr.width]="width()"
+          [attr.height]="height()"
+          [class.grabbing]="panning()"
+          (wheel)="onWheel($event)"
+          (mousedown)="onPanStart($event)"
+        >
+          <g [attr.transform]="'translate(' + tx() + ',' + ty() + ') scale(' + zoom() + ')'">
+            <g class="links">
+              @for (l of links(); track $index) {
+                <line
+                  [attr.x1]="l.x1"
+                  [attr.y1]="l.y1"
+                  [attr.x2]="l.x2"
+                  [attr.y2]="l.y2"
+                  stroke="rgba(128,128,128,0.4)"
+                  stroke-width="0.9"
+                  marker-end="url(#sg-arrow)"
                 />
-                <text [attr.y]="n.r + 9" text-anchor="middle" font-size="10" fill="var(--fg)" pointer-events="none">
-                  {{ n.label }}
-                </text>
-              </g>
-            }
+              }
+            </g>
+            <g class="nodes">
+              @for (n of nodes(); track n.id) {
+                <g
+                  [attr.transform]="'translate(' + n.cx + ',' + n.cy + ')'"
+                  class="node"
+                  (mousedown)="onNodeDown($event, n)"
+                  (click)="onClick(n)"
+                >
+                  <circle
+                    [attr.r]="n.r"
+                    [attr.fill]="n.fill"
+                    [attr.stroke]="n.current ? 'var(--fg)' : 'rgba(0,0,0,0.4)'"
+                    [attr.stroke-width]="n.current ? 1.6 : 0.6"
+                    [attr.opacity]="n.focused ? 1 : 0.85"
+                  />
+                  <text
+                    [attr.y]="n.r + 9"
+                    text-anchor="middle"
+                    font-size="10"
+                    fill="var(--fg)"
+                    pointer-events="none"
+                  >
+                    {{ n.label }}
+                  </text>
+                </g>
+              }
+            </g>
           </g>
           <defs>
-            <marker id="sg-arrow" viewBox="0 -5 10 10" refX="10" refY="0" markerWidth="6" markerHeight="6" orient="auto">
+            <marker
+              id="sg-arrow"
+              viewBox="0 -5 10 10"
+              refX="10"
+              refY="0"
+              markerWidth="6"
+              markerHeight="6"
+              orient="auto"
+            >
               <path d="M0,-3L10,0L0,3" fill="rgba(128,128,128,0.6)" />
             </marker>
           </defs>
         </svg>
+
+        @if (minimap(); as mm) {
+          <svg class="minimap" [attr.width]="mm.w" [attr.height]="mm.h" (mousedown)="onMinimapDown($event)">
+            <rect width="100%" height="100%" rx="4" fill="var(--bar-bg)" stroke="var(--border)" />
+            <g [attr.transform]="'translate(' + mm.offX + ',' + mm.offY + ')'">
+              @for (mn of mm.nodes; track mn.id) {
+                <circle [attr.cx]="mn.x" [attr.cy]="mn.y" [attr.r]="mn.r" [attr.fill]="mn.fill" fill-opacity="0.7" />
+              }
+            </g>
+            <rect
+              class="vp"
+              [attr.x]="mm.vpX"
+              [attr.y]="mm.vpY"
+              [attr.width]="mm.vpW"
+              [attr.height]="mm.vpH"
+              fill="rgba(0,0,0,0)"
+              stroke="var(--accent)"
+              stroke-width="1.2"
+              pointer-events="none"
+            />
+          </svg>
+        }
 
         <div class="legend">
           <span class="dot" style="background:#3b82f6"></span>type &nbsp;
@@ -157,6 +216,7 @@ const MAX_NODES = 400;
         border: 1px solid var(--border, rgba(128, 128, 128, 0.35));
         border-radius: 6px;
         overflow: hidden;
+        background: var(--bar-bg);
       }
       .seg button {
         border: 0;
@@ -167,9 +227,19 @@ const MAX_NODES = 400;
         padding: 2px 10px;
         cursor: pointer;
       }
+      .seg button + button {
+        border-left: 1px solid var(--border, rgba(128, 128, 128, 0.35));
+      }
       .seg button.on {
         background: var(--accent, #3b82f6);
         color: #fff;
+      }
+      .seg button:hover:not(.on) {
+        background: var(--hover);
+      }
+      .zoomctl button {
+        min-width: 26px;
+        font-variant-numeric: tabular-nums;
       }
       .hint {
         font-size: 11px;
@@ -178,8 +248,25 @@ const MAX_NODES = 400;
       svg {
         display: block;
       }
+      svg:not(.minimap) {
+        cursor: grab;
+      }
+      svg.grabbing {
+        cursor: grabbing;
+      }
       .node {
-        cursor: pointer;
+        cursor: grab;
+      }
+      .node:active {
+        cursor: grabbing;
+      }
+      .minimap {
+        position: absolute;
+        right: 8px;
+        bottom: 8px;
+        cursor: crosshair;
+        box-shadow: 0 1px 6px rgba(0, 0, 0, 0.2);
+        border-radius: 4px;
       }
       .placeholder {
         position: absolute;
@@ -237,6 +324,12 @@ export class SymbolGraphComponent implements AfterViewInit {
   readonly nodes = signal<RenderNode[]>([]);
   readonly links = signal<RenderLink[]>([]);
 
+  // Viewport transform for pan/zoom.
+  readonly tx = signal(0);
+  readonly ty = signal(0);
+  readonly zoom = signal(1);
+  readonly panning = signal(false);
+
   readonly supported = computed(() => isSymbolIndexSupported(this.languageId()));
   private readonly ready = computed(() => this.index.index() !== null);
 
@@ -257,6 +350,75 @@ export class SymbolGraphComponent implements AfterViewInit {
   private simEdges: { from: string; to: string }[] = [];
   /** Prior node positions, so an expansion doesn't scramble the existing layout. */
   private lastPos = new Map<string, { x: number; y: number }>();
+  /** Positions the user dragged a node to — kept pinned across re-layouts. */
+  private pinned = new Map<string, { x: number; y: number }>();
+  /** Fit the view once after the next reseed settles (not on incremental expansion). */
+  private pendingFit = false;
+  /** Set when a mousedown turned into a drag, so the trailing click doesn't expand. */
+  private justDragged = false;
+
+  private readonly nodeBounds = computed(() => {
+    const ns = this.nodes();
+    if (ns.length === 0) return null;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const n of ns) {
+      minX = Math.min(minX, n.cx - n.r);
+      minY = Math.min(minY, n.cy - n.r);
+      maxX = Math.max(maxX, n.cx + n.r);
+      maxY = Math.max(maxY, n.cy + n.r);
+    }
+    return { minX, minY, maxX, maxY };
+  });
+
+  readonly minimap = computed(() => {
+    const w = this.width();
+    const h = this.height();
+    const nodeB = this.nodeBounds();
+    const ns = this.nodes();
+    if (!nodeB || w === 0 || h === 0 || ns.length < 2) return null;
+
+    let { minX, minY, maxX, maxY } = nodeB;
+    // Grow the extent to include the current viewport so its rectangle never escapes.
+    const z = this.zoom();
+    const gx0 = -this.tx() / z;
+    const gy0 = -this.ty() / z;
+    const gx1 = gx0 + w / z;
+    const gy1 = gy0 + h / z;
+    minX = Math.min(minX, gx0);
+    minY = Math.min(minY, gy0);
+    maxX = Math.max(maxX, gx1);
+    maxY = Math.max(maxY, gy1);
+
+    const gw = Math.max(1, maxX - minX);
+    const gh = Math.max(1, maxY - minY);
+    const innerW = MINIMAP_W - 2 * MINIMAP_PAD;
+    const innerH = MINIMAP_H - 2 * MINIMAP_PAD;
+    const scale = Math.min(innerW / gw, innerH / gh);
+    const offX = MINIMAP_PAD - minX * scale;
+    const offY = MINIMAP_PAD - minY * scale;
+
+    return {
+      w: MINIMAP_W,
+      h: MINIMAP_H,
+      offX,
+      offY,
+      scale,
+      nodes: ns.map((n) => ({
+        id: n.id,
+        x: n.cx * scale,
+        y: n.cy * scale,
+        r: Math.max(1, n.r * scale * 0.7),
+        fill: n.fill,
+      })),
+      vpX: gx0 * scale + offX,
+      vpY: gy0 * scale + offY,
+      vpW: (w / z) * scale,
+      vpH: (h / z) * scale,
+    };
+  });
 
   constructor() {
     // Build the index lazily, and rebuild when a new project loads.
@@ -277,6 +439,8 @@ export class SymbolGraphComponent implements AfterViewInit {
           ? [path]
           : [...idx.defsByPath.keys()].filter((p) => parentFolder(p) === parentFolder(path));
       this.lastPos.clear();
+      this.pinned.clear();
+      this.pendingFit = true;
       this.focused.set(new Set(this.index.seed(paths)));
     });
 
@@ -361,18 +525,23 @@ export class SymbolGraphComponent implements AfterViewInit {
       layerCounts.set(l, (layerCounts.get(l) ?? 0) + 1);
     }
 
-    // x is pinned to the node's column (fx); only y is free, so columns stay crisp.
+    // x is pinned to the node's column (fx); only y is free, so columns stay crisp — unless
+    // the user dragged the node, in which case both axes stay wherever they dropped it.
     const seenInLayer = new Map<number, number>();
     this.simNodes = drawn.map((def) => {
       const l = layer.get(def.id) ?? 0;
       const rank = seenInLayer.get(l) ?? 0;
       seenInLayer.set(l, rank + 1);
+      const pin = this.pinned.get(def.id);
+      if (pin) {
+        return { id: def.id, def, r: nodeRadius(deg.get(def.id) ?? 0, maxDeg), fx: pin.x, fy: pin.y, x: pin.x, y: pin.y };
+      }
       const x = colX(l);
       const prev = this.lastPos.get(def.id);
       return {
         id: def.id,
         def,
-        r: 4 + Math.min(14, ((deg.get(def.id) ?? 0) / maxDeg) * 10),
+        r: nodeRadius(deg.get(def.id) ?? 0, maxDeg),
         fx: x,
         x,
         y: prev?.y ?? (h * (rank + 1)) / ((layerCounts.get(l) ?? 1) + 1),
@@ -413,11 +582,21 @@ export class SymbolGraphComponent implements AfterViewInit {
       );
     };
     sim.on('tick', tick);
-    sim.on('end', tick);
+    sim.on('end', () => {
+      tick();
+      if (this.pendingFit) {
+        this.pendingFit = false;
+        this.fitView();
+      }
+    });
     tick();
   }
 
   onClick(n: RenderNode): void {
+    if (this.justDragged) {
+      this.justDragged = false;
+      return;
+    }
     const def = this.index.index()?.defsById.get(n.id);
     if (!def) return;
     // Expand this node's neighbourhood…
@@ -433,6 +612,138 @@ export class SymbolGraphComponent implements AfterViewInit {
       endCol: def.endCol,
     });
   }
+
+  // --- Node dragging ------------------------------------------------------------------
+
+  onNodeDown(ev: MouseEvent, n: RenderNode): void {
+    const sn = this.simNodes.find((s) => s.id === n.id);
+    if (!sn) return;
+    ev.stopPropagation(); // don't also start a background pan
+    ev.preventDefault();
+    this.justDragged = false;
+
+    const rect = this.wrap.nativeElement.getBoundingClientRect();
+    const startX = ev.clientX;
+    const startY = ev.clientY;
+    let dragging = false;
+
+    const toGraph = (e: MouseEvent) => ({
+      x: (e.clientX - rect.left - this.tx()) / this.zoom(),
+      y: (e.clientY - rect.top - this.ty()) / this.zoom(),
+    });
+
+    const onMove = (e: MouseEvent): void => {
+      if (!dragging && Math.hypot(e.clientX - startX, e.clientY - startY) < 3) return;
+      if (!dragging) {
+        dragging = true;
+        this.sim?.alphaTarget(0.2).restart();
+      }
+      const g = toGraph(e);
+      sn.fx = g.x;
+      sn.fy = g.y;
+    };
+    const onUp = (): void => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      this.sim?.alphaTarget(0);
+      if (dragging) {
+        // Pin it where dropped so re-layouts leave it there; suppress the trailing click.
+        this.pinned.set(sn.id, { x: sn.fx ?? sn.x ?? 0, y: sn.fy ?? sn.y ?? 0 });
+        this.justDragged = true;
+      }
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }
+
+  // --- Pan / zoom ---------------------------------------------------------------------
+
+  onWheel(ev: WheelEvent): void {
+    ev.preventDefault();
+    const factor = ev.deltaY < 0 ? 1.1 : 1 / 1.1;
+    const rect = this.wrap.nativeElement.getBoundingClientRect();
+    const mx = ev.clientX - rect.left;
+    const my = ev.clientY - rect.top;
+    this.zoomAround(mx, my, factor);
+  }
+
+  zoomBy(factor: number): void {
+    this.zoomAround(this.width() / 2, this.height() / 2, factor);
+  }
+
+  private zoomAround(mx: number, my: number, factor: number): void {
+    const z0 = this.zoom();
+    const z1 = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z0 * factor));
+    if (z1 === z0) return;
+    this.tx.set(mx - ((mx - this.tx()) * z1) / z0);
+    this.ty.set(my - ((my - this.ty()) * z1) / z0);
+    this.zoom.set(z1);
+  }
+
+  onPanStart(ev: MouseEvent): void {
+    const tag = (ev.target as Element).tagName.toLowerCase();
+    if (tag === 'circle' || tag === 'text') return; // node interactions handle themselves
+    ev.preventDefault();
+    const startX = ev.clientX;
+    const startY = ev.clientY;
+    const startTx = this.tx();
+    const startTy = this.ty();
+    this.panning.set(true);
+    const onMove = (e: MouseEvent): void => {
+      this.tx.set(startTx + (e.clientX - startX));
+      this.ty.set(startTy + (e.clientY - startY));
+    };
+    const onUp = (): void => {
+      this.panning.set(false);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }
+
+  onMinimapDown(ev: MouseEvent): void {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const svg = ev.currentTarget as SVGSVGElement;
+    const center = (e: MouseEvent): void => {
+      const mm = this.minimap();
+      if (!mm) return;
+      const rect = svg.getBoundingClientRect();
+      const gx = (e.clientX - rect.left - mm.offX) / mm.scale;
+      const gy = (e.clientY - rect.top - mm.offY) / mm.scale;
+      const z = this.zoom();
+      this.tx.set(this.width() / 2 - gx * z);
+      this.ty.set(this.height() / 2 - gy * z);
+    };
+    center(ev);
+    const onMove = (e: MouseEvent): void => center(e);
+    const onUp = (): void => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }
+
+  /** Frames every node in the viewport with a little padding. */
+  fitView(): void {
+    const b = this.nodeBounds();
+    const w = this.width();
+    const h = this.height();
+    if (!b || w === 0 || h === 0) return;
+    const pad = 36;
+    const gw = Math.max(1, b.maxX - b.minX);
+    const gh = Math.max(1, b.maxY - b.minY);
+    const k = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.min((w - 2 * pad) / gw, (h - 2 * pad) / gh)));
+    this.zoom.set(k);
+    this.tx.set((w - k * (b.minX + b.maxX)) / 2);
+    this.ty.set((h - k * (b.minY + b.maxY)) / 2);
+  }
+}
+
+function nodeRadius(degree: number, maxDeg: number): number {
+  return 4 + Math.min(14, (degree / maxDeg) * 10);
 }
 
 function labelFor(def: SymbolDef): string {

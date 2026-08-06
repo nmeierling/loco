@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, Input, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { AnalysisStore } from '../core/state/analysis.store';
 import { TabsStore } from '../core/state/tabs.store';
@@ -11,7 +11,7 @@ import { DirNode, MetricKind, TreeNode, isDir, isFile, metricValue } from '../co
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (asDir(); as dir) {
-      <div class="row dir" (click)="toggle()" [class.root]="depth === 0">
+      <div class="row dir" (click)="toggle()" [class.root]="depth() === 0">
         <span class="chev">{{ expanded() ? '▾' : '▸' }}</span>
         <span class="icon">{{ expanded() ? '📂' : '📁' }}</span>
         <span class="name" [title]="dir.path || rootName()">{{ dir.name || rootName() }}</span>
@@ -39,7 +39,7 @@ import { DirNode, MetricKind, TreeNode, isDir, isFile, metricValue } from '../co
       @if (expanded()) {
         <div class="children" [style.padding-left.px]="indent">
           @for (c of sortedChildren(); track c.path) {
-            <loco-tree-node [node]="c" [depth]="depth + 1" />
+            <loco-tree-node [node]="c" [depth]="depth() + 1" />
           }
         </div>
       }
@@ -141,8 +141,8 @@ export class TreeNodeComponent {
   private readonly store = inject(AnalysisStore);
   private readonly tabs = inject(TabsStore);
 
-  @Input({ required: true }) node!: TreeNode;
-  @Input() depth = 0;
+  readonly node = input.required<TreeNode>();
+  readonly depth = input(0);
 
   readonly indent = 8;
   private readonly _expanded = signal(false);
@@ -170,25 +170,33 @@ export class TreeNodeComponent {
   readonly metric = computed<MetricKind>(() => this.store.filters().metric);
   readonly rootName = this.store.rootName;
 
-  readonly asDir = computed<DirNode | null>(() => (isDir(this.node) ? this.node : null));
-  readonly asFile = computed(() => (isFile(this.node) ? this.node : null));
+  readonly asDir = computed<DirNode | null>(() => {
+    const n = this.node();
+    return isDir(n) ? n : null;
+  });
+  readonly asFile = computed(() => {
+    const n = this.node();
+    return isFile(n) ? n : null;
+  });
 
-  readonly value = computed(() => metricValue(this.node, this.metric()));
+  readonly value = computed(() => metricValue(this.node(), this.metric()));
 
   readonly isSelected = computed(() => {
-    if (!isFile(this.node)) return false;
-    return this.store.selectedPath() === this.node.path;
+    const n = this.node();
+    if (!isFile(n)) return false;
+    return this.store.selectedPath() === n.path;
   });
 
   constructor() {
     queueMicrotask(() => {
-      if (this.depth < 2 && isDir(this.node)) this._expanded.set(true);
+      if (this.depth() < 2 && isDir(this.node())) this._expanded.set(true);
     });
   }
 
   sortedChildren(): TreeNode[] {
-    if (!isDir(this.node)) return [];
-    return [...this.node.children].sort((a, b) => {
+    const n = this.node();
+    if (!isDir(n)) return [];
+    return [...n.children].sort((a, b) => {
       if (isDir(a) !== isDir(b)) return isDir(a) ? -1 : 1;
       return a.name.localeCompare(b.name);
     });
@@ -203,11 +211,13 @@ export class TreeNodeComponent {
   }
 
   select(): void {
-    if (isFile(this.node)) this.store.selectPath(this.node.path);
+    const n = this.node();
+    if (isFile(n)) this.store.selectPath(n.path);
   }
 
   openAst(): void {
-    if (isFile(this.node)) this.tabs.openFile(this.node.path);
+    const n = this.node();
+    if (isFile(n)) this.tabs.openFile(n.path);
   }
 
   setPathFilter(ev: Event, path: string): void {

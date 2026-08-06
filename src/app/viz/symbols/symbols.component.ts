@@ -12,7 +12,7 @@ import {
   SymbolDef,
   SymbolIndexService,
 } from '../../core/services/symbol-index.service';
-import { AstSelectionService } from '../../ast/ast-selection.service';
+import { TabsStore } from '../../core/state/tabs.store';
 
 interface UnusedGroup {
   path: string;
@@ -390,7 +390,7 @@ type Bucket = 'external' | 'internal' | 'unused';
 export class SymbolsVizComponent {
   readonly store = inject(AnalysisStore);
   private readonly index = inject(SymbolIndexService);
-  private readonly selection = inject(AstSelectionService);
+  private readonly tabs = inject(TabsStore);
 
   readonly tab = signal<Tab>('unused');
   readonly copied = signal(false);
@@ -522,7 +522,7 @@ export class SymbolsVizComponent {
   }
 
   open(def: SymbolDef): void {
-    this.selection.jumpTo(def.path, {
+    this.tabs.openFileAt(def.path, {
       startRow: def.startRow,
       startCol: def.startCol,
       endRow: def.endRow,
