@@ -12,6 +12,7 @@ import { SunburstComponent } from './viz/sunburst/sunburst.component';
 import { DependencyMatrixComponent } from './viz/matrix/matrix.component';
 import { MetricListComponent } from './viz/list/metric-list.component';
 import { SymbolsVizComponent } from './viz/symbols/symbols.component';
+import { ComplexityDepthComponent } from './viz/complexity-depth/complexity-depth.component';
 
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -59,6 +60,12 @@ export const appConfig: ApplicationConfig = {
         label: 'Dep matrix',
         description: 'Folder-level import dependency matrix, drillable down to files.',
         component: DependencyMatrixComponent,
+      });
+      registry.register({
+        id: 'complexity-depth',
+        label: 'Complexity depth',
+        description: 'Top execution flows ranked by total branching, expandable to a call tree.',
+        component: ComplexityDepthComponent,
       });
     }),
   ],

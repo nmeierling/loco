@@ -15,6 +15,7 @@ import {
   extractRawRefs,
   isSymbolIndexSupported,
 } from './symbols';
+import { perSymbolComplexity } from './symbol-complexity';
 
 /** Languages whose imports are package-qualified and resolve through {@link resolveJvm}. */
 const JVM_LANGS = new Set(['kt', 'kts', 'java']);
@@ -93,6 +94,12 @@ export interface SymbolIndex {
   externalByPath: ReadonlyMap<string, ExternalRef[]>;
   /** Files that were parsed for symbols. */
   indexedPaths: ReadonlySet<string>;
+  /**
+   * Per-declaration branch count (McCabe-style), keyed by {@link SymbolDef.id}. A method
+   * with no branches is 1; the sum along a call tree is what the complexity-depth flow
+   * ranking uses. Empty for indexes built without complexity (e.g. unit-test fixtures).
+   */
+  complexityById: ReadonlyMap<string, number>;
 }
 
 export interface IndexProgress {
@@ -119,6 +126,7 @@ const EMPTY: SymbolIndex = {
   refsByPath: new Map(),
   externalByPath: new Map(),
   indexedPaths: new Set(),
+  complexityById: new Map(),
 };
 
 /**
@@ -260,6 +268,7 @@ export class SymbolIndexService {
     });
 
     const scans: FileScan[] = [];
+    const complexityById = new Map<string, number>();
     let done = 0;
     this.building.set({ done: 0, total: targets.length });
 
@@ -280,6 +289,12 @@ export class SymbolIndexService {
               refs: extractRawRefs(ast, t.langId, symbols),
               pkg: JVM_LANGS.has(t.langId) ? extractPackage(ast, t.langId) : null,
             });
+            // Compute per-symbol branch counts here, reusing this single parse. Same
+            // id scheme as `resolve` (first declaration wins on a collision).
+            for (const [sym, n] of perSymbolComplexity(ast, t.langId, symbols)) {
+              const id = defId(t.path, sym.owner, sym.name);
+              if (!complexityById.has(id)) complexityById.set(id, n);
+            }
           }
         } catch {
           // A file that won't parse simply contributes nothing to the index.
@@ -290,7 +305,7 @@ export class SymbolIndexService {
       if (done % 4 === 0) await new Promise((r) => setTimeout(r, 0));
     }
 
-    const index = resolve(scans, allFiles);
+    const index = resolve(scans, allFiles, complexityById);
     this.building.set(null);
     // A project swap mid-build invalidates the result; drop it rather than publish it.
     if (this.store.projectId() !== project) return EMPTY;
@@ -400,7 +415,11 @@ export function symbolSubgraph(
 }
 
 /** Cross-file resolution of raw scans into the queryable index. Exported for unit testing. */
-export function resolve(scans: readonly FileScan[], allFiles: ReadonlySet<string>): SymbolIndex {
+export function resolve(
+  scans: readonly FileScan[],
+  allFiles: ReadonlySet<string>,
+  complexityById: ReadonlyMap<string, number> = new Map(),
+): SymbolIndex {
   const defsById = new Map<string, SymbolDef>();
   const defsByPath = new Map<string, SymbolDef[]>();
 
@@ -683,5 +702,6 @@ export function resolve(scans: readonly FileScan[], allFiles: ReadonlySet<string
     refsByPath,
     externalByPath,
     indexedPaths: new Set(scans.map((s) => s.path)),
+    complexityById,
   };
 }
