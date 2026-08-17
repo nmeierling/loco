@@ -83,7 +83,7 @@ interface MetricOption {
           <input
             class="input"
             type="search"
-            placeholder="filter by name…"
+            placeholder="filter by name (e.g. *.kt)…"
             [ngModel]="filters().name"
             (ngModelChange)="setName($event)"
           />

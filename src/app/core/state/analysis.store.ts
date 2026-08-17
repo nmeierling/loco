@@ -32,7 +32,7 @@ export class AnalysisStore {
     const userIg = userPatterns.length > 0 ? this.ig.userIgnore() : null;
     if (!name && !path && !userIg) return root;
     const matcher = userIg ? (p: string) => userIg.ignores(p) : null;
-    const filtered = applyFilters(root, name.toLowerCase(), path.toLowerCase(), matcher);
+    const filtered = applyFilters(root, makeNameMatcher(name), path.toLowerCase(), matcher);
     if (filtered && isDir(filtered)) return filtered;
     // Filters eat everything — return an empty wrapper so vizzes can show a
     // tailored "no matches" empty state instead of silently rendering the
@@ -156,15 +156,36 @@ export class AnalysisStore {
   }
 }
 
+type NameMatcher = (name: string) => boolean;
+
+/**
+ * Builds the name-filter predicate. A query containing `*` or `?` is treated as a glob
+ * anchored to the whole file name (so `*.kt` shows only Kotlin files); anything else keeps
+ * the plain case-insensitive substring behavior. Returns null when the query is empty.
+ */
+function makeNameMatcher(raw: string): NameMatcher | null {
+  const q = raw.trim().toLowerCase();
+  if (!q) return null;
+  if (q.includes('*') || q.includes('?')) {
+    const body = q
+      .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+      .replace(/\*/g, '.*')
+      .replace(/\?/g, '.');
+    const re = new RegExp(`^${body}$`);
+    return (name) => re.test(name.toLowerCase());
+  }
+  return (name) => name.toLowerCase().includes(q);
+}
+
 function applyFilters(
   node: TreeNode,
-  nameQ: string,
+  nameMatch: NameMatcher | null,
   pathQ: string,
   userIgnored: ((path: string) => boolean) | null,
 ): TreeNode | null {
   if (isFile(node)) {
     if (userIgnored && userIgnored(node.path)) return null;
-    const nameOk = !nameQ || node.name.toLowerCase().includes(nameQ);
+    const nameOk = !nameMatch || nameMatch(node.name);
     const pathOk = !pathQ || node.path.toLowerCase().includes(pathQ);
     return nameOk && pathOk ? node : null;
   }
@@ -172,7 +193,7 @@ function applyFilters(
   const dirPathOk = !pathQ || node.path.toLowerCase().includes(pathQ);
   const kept: TreeNode[] = [];
   for (const child of node.children) {
-    const k = applyFilters(child, nameQ, dirPathOk ? '' : pathQ, userIgnored);
+    const k = applyFilters(child, nameMatch, dirPathOk ? '' : pathQ, userIgnored);
     if (k) kept.push(k);
   }
   if (kept.length === 0) return null;

@@ -13,6 +13,7 @@ import { DependencyMatrixComponent } from './viz/matrix/matrix.component';
 import { MetricListComponent } from './viz/list/metric-list.component';
 import { SymbolsVizComponent } from './viz/symbols/symbols.component';
 import { ComplexityDepthComponent } from './viz/complexity-depth/complexity-depth.component';
+import { IsometricComponent } from './viz/isometric/isometric.component';
 
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -66,6 +67,13 @@ export const appConfig: ApplicationConfig = {
         label: 'Complexity depth',
         description: 'Top execution flows ranked by total branching, expandable to a call tree.',
         component: ComplexityDepthComponent,
+      });
+      registry.register({
+        id: 'isometric',
+        label: 'Isometric',
+        description:
+          'Files as buildings on an isometric plane — height, footprint and color each a metric.',
+        component: IsometricComponent,
       });
     }),
   ],
