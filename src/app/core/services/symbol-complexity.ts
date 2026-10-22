@@ -1,4 +1,4 @@
-import { AstNode } from './complexity.service';
+import type { AstNode } from './complexity.service';
 import { LANG_MAP } from './treesitter-langs';
 import { FileSymbol } from './symbols';
 

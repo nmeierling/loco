@@ -39,17 +39,38 @@ test.describe('UI polish', () => {
   });
 
   test('selecting a file leaves the module graph layout untouched', async ({ page }) => {
+    // The force layout has to cool all the way down before positions can be compared.
+    test.setTimeout(45_000);
+
     await loadFixture(page);
     await selectViz(page, 'Module graph');
     await page.waitForSelector('loco-module-graph svg circle');
-    // Let the force layout settle before sampling positions.
-    await page.waitForTimeout(2500);
 
     const positions = () =>
       page.$$eval('loco-module-graph .nodes g', (gs) =>
         gs.map((g) => g.getAttribute('transform')).join('|'),
       );
-    const before = await positions();
+
+    /**
+     * Positions once the simulation has stopped moving.
+     *
+     * A fixed wait used to stand in for this, and on a slower machine the layout was
+     * still cooling when it expired — so the comparison below failed on sub-pixel drift
+     * rather than on the thing it is actually guarding against, which is the layout
+     * being restarted and every node thrown somewhere new.
+     */
+    const settled = async (): Promise<string> => {
+      let last = await positions();
+      for (let i = 0; i < 60; i++) {
+        await page.waitForTimeout(250);
+        const now = await positions();
+        if (now === last) return now;
+        last = now;
+      }
+      throw new Error('module graph never stopped moving');
+    };
+
+    const before = await settled();
 
     await page.locator('loco-module-graph .nodes g').nth(3).click();
     await page.waitForTimeout(600);

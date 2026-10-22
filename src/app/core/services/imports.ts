@@ -1,4 +1,4 @@
-import { AstNode } from './complexity.service';
+import type { AstNode } from './complexity.service';
 
 export interface RawImport {
   /** Raw specifier as it appears in source, e.g. './foo', '../bar', 'react', 'com.example.Foo'. */

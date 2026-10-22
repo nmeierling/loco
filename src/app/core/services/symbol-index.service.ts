@@ -4,18 +4,8 @@ import { ComplexityService } from './complexity.service';
 import { detectLanguage } from '../languages';
 import { walk } from '../models/tree';
 import { buildJvmContext, resolveJvm, resolveSpecifier } from './module-resolve';
-import { extractPackage } from './imports';
-import {
-  FileSymbol,
-  ImportBinding,
-  RawRef,
-  SymbolKind,
-  extractFileSymbols,
-  extractImportBindings,
-  extractRawRefs,
-  isSymbolIndexSupported,
-} from './symbols';
-import { perSymbolComplexity } from './symbol-complexity';
+import { mapPool, throttleProgress } from '../perf/pool';
+import { FileSymbol, ImportBinding, RawRef, SymbolKind, isSymbolIndexSupported } from './symbols';
 
 /** Languages whose imports are package-qualified and resolve through {@link resolveJvm}. */
 const JVM_LANGS = new Set(['kt', 'kts', 'java']);
@@ -267,42 +257,47 @@ export class SymbolIndexService {
       if (lang && isSymbolIndexSupported(lang.id)) targets.push({ path: n.path, langId: lang.id });
     });
 
+    this.building.set({ done: 0, total: targets.length });
+    const onProgress = throttleProgress((done, total) => this.building.set({ done, total }));
+
+    // One worker round-trip per file, pool-wide. The declarations, bindings, references
+    // and per-symbol branch counts are all extracted from a single parse inside the
+    // worker, so what crosses the wire is the index data rather than the AST.
+    const scanned = await mapPool(
+      targets,
+      this.complexity.concurrency,
+      async (t): Promise<{ scan: FileScan; complexity: number[] } | null> => {
+        const file = blobs.get(t.path);
+        if (!file) return null;
+        const text = await file.text();
+        const wire = await this.complexity.scanSymbols(text, t.langId, JVM_LANGS.has(t.langId));
+        if (!wire) return null;
+        return {
+          scan: {
+            path: t.path,
+            langId: t.langId,
+            lines: text.split(/\r?\n/),
+            symbols: wire.symbols,
+            bindings: wire.bindings,
+            refs: wire.refs,
+            pkg: wire.pkg,
+          },
+          complexity: wire.complexity,
+        };
+      },
+      onProgress,
+    );
+
     const scans: FileScan[] = [];
     const complexityById = new Map<string, number>();
-    let done = 0;
-    this.building.set({ done: 0, total: targets.length });
-
-    for (const t of targets) {
-      const file = blobs.get(t.path);
-      if (file) {
-        try {
-          const text = await file.text();
-          const ast = await this.complexity.parse(text, t.langId);
-          if (ast) {
-            const symbols = extractFileSymbols(ast, t.langId);
-            scans.push({
-              path: t.path,
-              langId: t.langId,
-              lines: text.split(/\r?\n/),
-              symbols,
-              bindings: extractImportBindings(ast, t.langId),
-              refs: extractRawRefs(ast, t.langId, symbols),
-              pkg: JVM_LANGS.has(t.langId) ? extractPackage(ast, t.langId) : null,
-            });
-            // Compute per-symbol branch counts here, reusing this single parse. Same
-            // id scheme as `resolve` (first declaration wins on a collision).
-            for (const [sym, n] of perSymbolComplexity(ast, t.langId, symbols)) {
-              const id = defId(t.path, sym.owner, sym.name);
-              if (!complexityById.has(id)) complexityById.set(id, n);
-            }
-          }
-        } catch {
-          // A file that won't parse simply contributes nothing to the index.
-        }
-      }
-      done++;
-      this.building.set({ done, total: targets.length });
-      if (done % 4 === 0) await new Promise((r) => setTimeout(r, 0));
+    for (const entry of scanned) {
+      if (!entry) continue;
+      scans.push(entry.scan);
+      // Same id scheme as `resolve` — first declaration wins on a collision.
+      entry.scan.symbols.forEach((sym, i) => {
+        const id = defId(entry.scan.path, sym.owner, sym.name);
+        if (!complexityById.has(id)) complexityById.set(id, entry.complexity[i] ?? 1);
+      });
     }
 
     const index = resolve(scans, allFiles, complexityById);

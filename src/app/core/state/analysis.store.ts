@@ -1,5 +1,5 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { DirNode, FileNode, TreeNode, isDir, isFile, walk } from '../models/tree';
+import { DirNode, DisplayMetric, FileNode, TreeNode, isDir, isFile, walk } from '../models/tree';
 import { AnalysisPhase, ChurnState, RiskState } from '../models/analysis';
 import { DEFAULT_FILTERS, Filters } from '../models/filters';
 import { IgnoreService } from '../services/ignore.service';
@@ -24,10 +24,35 @@ export class AnalysisStore {
   /** Path → File for files that survived ignore filters. Lets per-file views (AST) re-read text on demand. */
   readonly fileBlobs = signal<ReadonlyMap<string, File>>(new Map());
 
+  /**
+   * The displayed metric on its own.
+   *
+   * `filters` bundles the metric with the name/path query, so reading `filters().metric`
+   * made a metric switch look like a filter change to everything downstream — and vice
+   * versa. Narrow signals keep those two concerns from invalidating each other.
+   */
+  readonly metric = computed<DisplayMetric>(() => this.filters().metric);
+
+  /**
+   * A name query is in effect. The file tree force-expands while one is, and reading it
+   * as a boolean means a metric switch or a path-filter edit no longer re-renders every
+   * node in the tree.
+   */
+  readonly nameFilterActive = computed<boolean>(() => this.filters().name !== '');
+
+  /** Just the text query, with value equality so a metric switch doesn't propagate. */
+  private readonly textFilters = computed(
+    () => {
+      const f = this.filters();
+      return { name: f.name, path: f.path };
+    },
+    { equal: (a, b) => a.name === b.name && a.path === b.path },
+  );
+
   readonly filteredRoot = computed<DirNode | null>(() => {
     const root = this.root();
     if (!root) return null;
-    const { name, path } = this.filters();
+    const { name, path } = this.textFilters();
     const userPatterns = this.ig.userPatterns();
     const userIg = userPatterns.length > 0 ? this.ig.userIgnore() : null;
     if (!name && !path && !userIg) return root;

@@ -12,6 +12,7 @@ import {
 } from '@angular/core';
 import { AnalysisStore } from '../../core/state/analysis.store';
 import { ModuleGraphService } from '../../core/services/module-graph.service';
+import { ViewSpinnerComponent } from '../../shell/view-spinner.component';
 
 /** A matrix row/column: either a folder aggregating everything beneath it, or a file. */
 interface Group {
@@ -24,6 +25,8 @@ interface Group {
 }
 
 interface Cell {
+  /** Stable identity for `track`; `ri * n + ci` would collide once n exceeds the literal. */
+  key: string;
   ri: number;
   ci: number;
   x: number;
@@ -31,6 +34,8 @@ interface Cell {
   size: number;
   /** Import edges from the row group to the column group. On the diagonal: internal edges. */
   weight: number;
+  /** Resolved paint, computed once with the cell rather than per change-detection pass. */
+  fill: string;
 }
 
 interface Crumb {
@@ -43,6 +48,7 @@ type Mode = 'folders' | 'files';
 @Component({
   selector: 'loco-dependency-matrix',
   standalone: true,
+  imports: [ViewSpinnerComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="wrap">
@@ -88,30 +94,40 @@ type Mode = 'folders' | 'files';
 
         <div class="spacer"></div>
 
-        @if (status() === 'ready') {
+        @if (status() === 'ready' && !tooManyRows()) {
           <div class="count">{{ groups().length }} × {{ groups().length }}</div>
         }
       </div>
 
       <div class="canvas" #canvas>
         @if (status() === 'idle' || status() === 'building') {
-          <div class="status-overlay">
-            @if (progress(); as p) {
-              <div class="msg">
-                Building dependency matrix…
-                <div class="bar">
-                  <div class="fill" [style.width.%]="(p.done / p.total) * 100"></div>
-                </div>
-                <div class="counts">{{ p.done }} / {{ p.total }}</div>
-              </div>
-            } @else {
-              <div class="msg">Preparing matrix…</div>
-            }
-          </div>
+          @if (progress(); as p) {
+            <loco-view-spinner
+              label="Building dependency matrix…"
+              [detail]="
+                p.done.toLocaleString() + ' / ' + p.total.toLocaleString() + ' files scanned'
+              "
+              [done]="p.done"
+              [total]="p.total"
+            />
+          } @else {
+            <loco-view-spinner label="Preparing matrix…" />
+          }
         } @else if (status() === 'empty') {
           <div class="status-overlay">
             <div class="msg">
               No imports found. Matrix supports TS/TSX/JS/JSX, Python, Kotlin and Java.
+            </div>
+          </div>
+        } @else if (tooManyRows(); as many) {
+          <div class="status-overlay">
+            <div class="msg">
+              {{ many.label }} files at this level — a {{ many.label }} × {{ many.label }} grid is
+              neither readable nor fast.
+              <div class="counts">Drill into a folder, or switch back to folder level.</div>
+              <button type="button" class="link" (click)="setMode('folders')">
+                Show folders instead
+              </button>
             </div>
           </div>
         } @else if (groups().length === 0) {
@@ -132,20 +148,18 @@ type Mode = 'folders' | 'files';
                 fill="var(--input-bg)"
                 stroke="var(--border)"
               />
-              @for (cell of cells(); track cell.ri * 4096 + cell.ci) {
+              @for (cell of cells(); track cell.key) {
                 <rect
                   [attr.x]="cell.x"
                   [attr.y]="cell.y"
                   [attr.width]="cell.size"
                   [attr.height]="cell.size"
-                  [attr.fill]="cellFill(cell)"
-                  (mouseenter)="hoverCell.set({ ri: cell.ri, ci: cell.ci })"
-                  (mouseleave)="hoverCell.set(null)"
-                  (click)="onCellClick(cell)"
+                  [attr.fill]="cell.fill"
+                  pointer-events="none"
                 />
               }
               @if (showWeights()) {
-                @for (cell of labelledCells(); track cell.ri * 4096 + cell.ci) {
+                @for (cell of labelledCells(); track cell.key) {
                   <text
                     [attr.x]="cell.x + cell.size / 2"
                     [attr.y]="cell.y + cell.size / 2 + 3"
@@ -177,6 +191,20 @@ type Mode = 'folders' | 'files';
                   pointer-events="none"
                 />
               }
+              <!-- One transparent hit target for the whole grid. Per-cell listeners meant
+                   n-squared DOM nodes carrying n-squared event bindings, and every pointer
+                   move re-checked all of them. -->
+              <rect
+                class="hit"
+                x="0"
+                y="0"
+                [attr.width]="gridSize()"
+                [attr.height]="gridSize()"
+                fill="transparent"
+                (mousemove)="onGridMove($event)"
+                (mouseleave)="hoverCell.set(null)"
+                (click)="onGridClick($event)"
+              />
             </g>
 
             <!-- row labels -->
@@ -472,6 +500,7 @@ export class DependencyMatrixComponent implements AfterViewInit {
     const prefix = this.focus() ? this.focus() + '/' : '';
     if (paths.length === 0) return [];
     if (this.mode() === 'files') {
+      if (paths.length > MAX_FILE_ROWS) return [];
       return paths.map((p) => ({
         path: p,
         label: p.slice(prefix.length),
@@ -482,6 +511,18 @@ export class DependencyMatrixComponent implements AfterViewInit {
     return partition(paths, prefix).sort((a, b) =>
       a.isDir === b.isDir ? a.label.localeCompare(b.label) : a.isDir ? -1 : 1,
     );
+  });
+
+  /**
+   * File level is refused above {@link MAX_FILE_ROWS}. Folder level partitions down to
+   * at most 40 rows, but file level is one row per file — at repo scale that is a grid
+   * with millions of cells, which no amount of render tuning makes readable.
+   */
+  readonly tooManyRows = computed<{ label: string } | null>(() => {
+    if (this.mode() !== 'files') return null;
+    const count = this.scopedPaths().length;
+    if (count <= MAX_FILE_ROWS) return null;
+    return { label: count.toLocaleString() };
   });
 
   /** group index → weight matrix, flattened. Diagonal entries hold internal edges. */
@@ -556,16 +597,44 @@ export class DependencyMatrixComponent implements AfterViewInit {
       this.topPad + Math.max(0, Math.floor((this.height() - this.topPad - this.gridSize()) / 2)),
   );
 
+  /**
+   * Only the cells that paint something: the diagonal, plus the off-diagonal cells that
+   * carry at least one import.
+   *
+   * The dense version emitted one object and one `<rect>` per matrix position. At file
+   * level on a real repo that is millions of both, and because the fill was a template
+   * method call, every pointer move re-evaluated all of them. A dependency matrix is
+   * almost all zeros, so the sparse set is smaller by orders of magnitude and the empty
+   * background rect already shows "nothing here".
+   */
   readonly cells = computed<Cell[]>(() => {
     const n = this.groups().length;
     const s = this.cellSize();
     if (n === 0 || s === 0) return [];
     const w = this.weights();
+    const max = Math.max(1, this.maxWeight());
     const out: Cell[] = [];
-    for (let ri = 0; ri < n; ri++) {
-      for (let ci = 0; ci < n; ci++) {
-        out.push({ ri, ci, x: ci * s, y: ri * s, size: s, weight: w.get(ri * n + ci) ?? 0 });
-      }
+
+    const push = (ri: number, ci: number, weight: number): void => {
+      out.push({
+        key: ri + ':' + ci,
+        ri,
+        ci,
+        x: ci * s,
+        y: ri * s,
+        size: s,
+        weight,
+        fill: paintFor(ri, ci, weight, max),
+      });
+    };
+
+    for (let ri = 0; ri < n; ri++) push(ri, ri, w.get(ri * n + ri) ?? 0);
+    for (const [key, weight] of w) {
+      if (weight <= 0) continue;
+      const ri = Math.floor(key / n);
+      const ci = key - ri * n;
+      if (ri === ci) continue;
+      push(ri, ci, weight);
     }
     return out;
   });
@@ -669,24 +738,36 @@ export class DependencyMatrixComponent implements AfterViewInit {
     else this.store.selectPath(g.path);
   }
 
-  onCellClick(cell: Cell): void {
-    const g = this.groups()[cell.ri];
-    if (!g) return;
-    if (!g.isDir) this.store.selectPath(g.path);
+  /** Which cell the pointer is over, derived from the grid geometry rather than per-cell listeners. */
+  onGridMove(ev: MouseEvent): void {
+    const at = this.cellAt(ev);
+    const cur = this.hoverCell();
+    if (!at) {
+      if (cur) this.hoverCell.set(null);
+      return;
+    }
+    if (cur && cur.ri === at.ri && cur.ci === at.ci) return;
+    this.hoverCell.set(at);
   }
 
-  cellFill(cell: Cell): string {
-    if (cell.ri === cell.ci) {
-      return cell.weight > 0
-        ? 'color-mix(in srgb, var(--fg) 26%, transparent)'
-        : 'color-mix(in srgb, var(--fg) 12%, transparent)';
-    }
-    if (cell.weight === 0) return 'transparent';
-    // Single-hue sequential ramp: heavier coupling reads as a denser accent.
-    const max = Math.max(1, this.maxWeight());
-    const t = Math.min(1, cell.weight / max);
-    const pct = Math.round(35 + t * 65);
-    return `color-mix(in srgb, var(--accent) ${pct}%, transparent)`;
+  onGridClick(ev: MouseEvent): void {
+    const at = this.cellAt(ev);
+    if (!at) return;
+    const g = this.groups()[at.ri];
+    if (g && !g.isDir) this.store.selectPath(g.path);
+  }
+
+  private cellAt(ev: MouseEvent): { ri: number; ci: number } | null {
+    const size = this.cellSize();
+    if (size <= 0) return null;
+    const target = ev.currentTarget as SVGGraphicsElement | null;
+    if (!target) return null;
+    const box = target.getBoundingClientRect();
+    const ci = Math.floor((ev.clientX - box.left) / size);
+    const ri = Math.floor((ev.clientY - box.top) / size);
+    const n = this.groups().length;
+    if (ri < 0 || ci < 0 || ri >= n || ci >= n) return null;
+    return { ri, ci };
   }
 
   private async kickoff(): Promise<void> {
@@ -708,6 +789,21 @@ export class DependencyMatrixComponent implements AfterViewInit {
 /** Fewer rows than this reads as a near-empty grid; more starts to get unreadable. */
 const MIN_GROUPS = 8;
 const MAX_GROUPS = 40;
+
+/** File level refuses to draw above this many rows — see `tooManyRows`. */
+const MAX_FILE_ROWS = 600;
+
+/** Cell paint. Diagonal cells are the group's own internals; off-diagonal is coupling. */
+function paintFor(ri: number, ci: number, weight: number, max: number): string {
+  if (ri === ci) {
+    return weight > 0
+      ? 'color-mix(in srgb, var(--fg) 26%, transparent)'
+      : 'color-mix(in srgb, var(--fg) 12%, transparent)';
+  }
+  // Single-hue sequential ramp: heavier coupling reads as a denser accent.
+  const pct = Math.round(35 + Math.min(1, weight / max) * 65);
+  return `color-mix(in srgb, var(--accent) ${pct}%, transparent)`;
+}
 
 /**
  * Splits a set of file paths into folder-sized buckets. Starts from the immediate

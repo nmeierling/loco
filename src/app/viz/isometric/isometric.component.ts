@@ -9,8 +9,12 @@ import {
   effect,
   inject,
   signal,
+  viewChild,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { deferredLayout } from '../../core/perf/deferred';
+import { createSizeTracker } from '../../core/perf/schedule';
+import { ViewSpinnerComponent } from '../../shell/view-spinner.component';
 import { interpolateYlOrRd } from 'd3-scale-chromatic';
 import { scaleSequential } from 'd3-scale';
 import { HierarchyRectangularNode, hierarchy, treemap, treemapSquarify } from 'd3-hierarchy';
@@ -18,7 +22,7 @@ import { AnalysisStore } from '../../core/state/analysis.store';
 import { TabsStore } from '../../core/state/tabs.store';
 import { IgnoreService } from '../../core/services/ignore.service';
 import { RiskService } from '../../core/services/risk.service';
-import { ModuleGraphService } from '../../core/services/module-graph.service';
+import { ModuleGraph, ModuleGraphService } from '../../core/services/module-graph.service';
 import {
   DirNode,
   DisplayMetric,
@@ -53,6 +57,9 @@ const CAP = 2500;
 
 /** Wheel-zoom sensitivity per normalized pixel of scroll. Small = gentle trackpad zoom. */
 const ZOOM_SENSITIVITY = 0.0015;
+
+/** How long the camera must hold still before labels re-evaluate against the new zoom. */
+const ZOOM_SETTLE_MS = 140;
 
 /** On-screen width (px) a building/plate must exceed before its label is drawn. */
 const LABEL_MIN_PX = 52;
@@ -160,10 +167,13 @@ interface Scene {
 @Component({
   selector: 'loco-isometric',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, ViewSpinnerComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="wrap" #wrap>
+      @if (building()) {
+        <loco-view-spinner label="Building the city…" [detail]="buildingDetail()" />
+      }
       <div class="controls">
         <label class="pick">
           <span class="cap">layout</span>
@@ -239,8 +249,8 @@ interface Scene {
             @case ('churn-loading') {
               <p class="empty-title">Walking git history…</p>
               <p class="empty-hint">
-                Churn is computed in the background. Buildings appear once the walk finishes —
-                other metrics are usable in the meantime.
+                Churn is computed in the background. Buildings appear once the walk finishes — other
+                metrics are usable in the meantime.
               </p>
               <div class="progress" role="progressbar">
                 @if (e.total > 0) {
@@ -284,13 +294,22 @@ interface Scene {
           (mouseleave)="onPanEnd(); onLeave()"
           [class.panning]="panning()"
         >
-          <g [attr.transform]="'translate(' + panX() + ',' + panY() + ') scale(' + zoom() + ')'">
+          <!-- The camera transform is written straight to this element on each frame.
+               Binding it to signals meant a pan dirtied the component, and a dirty
+               component re-checks every binding of every building in the scene. -->
+          <g #camera>
             @for (p of s.plates; track $index) {
               <polygon [attr.points]="p.points" class="plate" [style.fill]="p.fill" />
             }
             <!-- Import roads on the ground, under the buildings. -->
             @for (r of s.roads; track $index) {
-              <line class="road" [attr.x1]="r.x1" [attr.y1]="r.y1" [attr.x2]="r.x2" [attr.y2]="r.y2" />
+              <line
+                class="road"
+                [attr.x1]="r.x1"
+                [attr.y1]="r.y1"
+                [attr.x2]="r.x2"
+                [attr.y2]="r.y2"
+              />
             }
             @for (b of s.boxes; track b.node.path) {
               <g
@@ -307,7 +326,7 @@ interface Scene {
                   [attr.stroke]="isSelected(b) ? 'var(--accent)' : 'rgba(0,0,0,0.28)'"
                   [attr.stroke-width]="isSelected(b) ? 2 : 0.4"
                 />
-                @if (b.baseWidth * zoom() > labelMin) {
+                @if (b.baseWidth * labelZoom() > labelMin) {
                   <text
                     [attr.x]="b.labelX"
                     [attr.y]="b.labelY"
@@ -325,7 +344,7 @@ interface Scene {
             }
             <!-- District labels last so they stay legible above the buildings. -->
             @for (p of s.plates; track $index) {
-              @if (p.name && p.baseWidth * zoom() > plateLabelMin) {
+              @if (p.name && p.baseWidth * labelZoom() > plateLabelMin) {
                 <text
                   class="plate-label"
                   [attr.x]="p.labelX"
@@ -672,11 +691,13 @@ export class IsometricComponent implements AfterViewInit {
   private readonly destroyRef = inject(DestroyRef);
 
   @ViewChild('wrap', { static: true }) wrap!: ElementRef<HTMLDivElement>;
+  private readonly camera = viewChild<ElementRef<SVGGElement>>('camera');
 
   readonly metrics = METRICS;
 
-  readonly width = signal(0);
-  readonly height = signal(0);
+  private readonly size = createSizeTracker();
+  readonly width = this.size.width;
+  readonly height = this.size.height;
 
   readonly layout = signal<Layout>('districts');
   readonly heightMetric = signal<DisplayMetric>('complexity');
@@ -684,18 +705,62 @@ export class IsometricComponent implements AfterViewInit {
   readonly colorMetric = signal<DisplayMetric>('complexity');
   readonly roads = signal(false);
 
-  readonly scene = signal<Scene | null>(null);
   readonly colorMax = signal(0);
   readonly legendStops = signal<string[]>([]);
 
-  // Camera. Fit is baked into the scene coordinates; these are the user's pan/zoom on top.
-  readonly zoom = signal(1);
-  readonly panX = signal(0);
-  readonly panY = signal(0);
-  readonly panning = signal(false);
-  private panOrigin: { x: number; y: number; px: number; py: number } | null = null;
+  /**
+   * The projected scene. Laying out up to {@link CAP} buildings, packing their districts
+   * and projecting every face is far too much to do between an input change and the next
+   * frame, so it happens behind the in-view spinner.
+   */
+  private readonly view = deferredLayout({
+    inputs: () => ({
+      root: this.store.filteredRoot(),
+      layout: this.layout(),
+      heightMetric: this.heightMetric(),
+      footprintMetric: this.footprintMetric(),
+      colorMetric: this.colorMetric(),
+      w: this.size.settledWidth(),
+      h: this.size.settledHeight(),
+      // Read here, not inside `build` — the build runs detached from the reactive graph.
+      roads: this.roads(),
+      graph: this.roads() ? this.moduleGraph.graph() : null,
+    }),
+    build: (i) => this.build(i.root, i, i.w, i.h),
+    initial: null as Scene | null,
+    weight: ({ root }) => (root ? fileCount(root) : 0),
+  });
 
-  readonly zoomed = computed(() => this.zoom() !== 1 || this.panX() !== 0 || this.panY() !== 0);
+  readonly scene = this.view.value;
+  readonly building = this.view.building;
+  readonly buildingDetail = computed(() => {
+    const root = this.store.filteredRoot();
+    const n = root ? fileCount(root) : 0;
+    return n > 0 ? `${Math.min(n, CAP).toLocaleString()} buildings` : null;
+  });
+
+  /**
+   * Camera state. Deliberately *not* signals: the transform is written to the DOM
+   * directly, so dragging the view never marks this component dirty and never re-checks
+   * the thousands of bindings the scene puts on screen.
+   */
+  private zoomLevel = 1;
+  private panXValue = 0;
+  private panYValue = 0;
+  private panOrigin: { x: number; y: number; px: number; py: number } | null = null;
+  private cameraFrame = 0;
+  private zoomSettleTimer: ReturnType<typeof setTimeout> | null = null;
+
+  readonly panning = signal(false);
+  /** Drives the "reset view" affordance; flips at most once per gesture. */
+  readonly zoomed = signal(false);
+  /**
+   * Zoom as the *labels* see it, updated once the gesture settles. Label visibility and
+   * counter-scaled font sizes are template bindings, so tying them to the live zoom
+   * would reintroduce a full re-check on every wheel event.
+   */
+  readonly labelZoom = signal(1);
+
   /** True while roads are on but the import graph is still being computed. */
   readonly linking = computed(() => this.roads() && !!this.moduleGraph.building());
 
@@ -707,8 +772,8 @@ export class IsometricComponent implements AfterViewInit {
   readonly plateLabelMin = PLATE_LABEL_MIN_PX;
   // Labels live inside the zoomed <g>, so counter-scale the font to hold a constant
   // on-screen size instead of ballooning as the user zooms in.
-  readonly buildingFont = computed(() => LABEL_FONT_PX / this.zoom());
-  readonly districtFont = computed(() => PLATE_FONT_PX / this.zoom());
+  readonly buildingFont = computed(() => LABEL_FONT_PX / this.labelZoom());
+  readonly districtFont = computed(() => PLATE_FONT_PX / this.labelZoom());
 
   readonly tip = signal<{
     x: number;
@@ -760,34 +825,23 @@ export class IsometricComponent implements AfterViewInit {
   constructor() {
     // Seed the height axis from the sidebar's current metric so the view opens showing
     // whatever the user was already looking at; it's independent afterwards.
-    const globalMetric = this.store.filters().metric;
+    const globalMetric = this.store.metric();
     if (globalMetric) this.heightMetric.set(globalMetric);
 
+    // The camera element comes and goes with the empty states; re-apply the transform
+    // whenever it reappears so a pan survives a metric switch.
     effect(() => {
-      const root = this.store.filteredRoot();
-      const opts = {
-        layout: this.layout(),
-        heightMetric: this.heightMetric(),
-        footprintMetric: this.footprintMetric(),
-        colorMetric: this.colorMetric(),
-      };
-      const w = this.width();
-      const h = this.height();
-      this.scene.set(this.build(root, opts, w, h));
+      if (this.camera()) this.applyCamera();
+    });
+
+    this.destroyRef.onDestroy(() => {
+      if (this.cameraFrame !== 0) cancelAnimationFrame(this.cameraFrame);
+      if (this.zoomSettleTimer !== null) clearTimeout(this.zoomSettleTimer);
     });
   }
 
   ngAfterViewInit(): void {
-    const el = this.wrap.nativeElement;
-    const ro = new ResizeObserver((entries) => {
-      for (const e of entries) {
-        const r = e.contentRect;
-        this.width.set(Math.max(0, Math.floor(r.width)));
-        this.height.set(Math.max(0, Math.floor(r.height)));
-      }
-    });
-    ro.observe(el);
-    this.destroyRef.onDestroy(() => ro.disconnect());
+    this.size.attach(this.wrap.nativeElement, this.destroyRef);
   }
 
   setMetric(axis: 'height' | 'footprint' | 'color', metric: DisplayMetric): void {
@@ -810,9 +864,37 @@ export class IsometricComponent implements AfterViewInit {
   }
 
   resetView(): void {
-    this.zoom.set(1);
-    this.panX.set(0);
-    this.panY.set(0);
+    this.zoomLevel = 1;
+    this.panXValue = 0;
+    this.panYValue = 0;
+    this.scheduleCamera();
+  }
+
+  /** Writes the camera transform directly, at most once per frame. */
+  private scheduleCamera(): void {
+    if (this.cameraFrame === 0) {
+      this.cameraFrame = requestAnimationFrame(() => {
+        this.cameraFrame = 0;
+        this.applyCamera();
+      });
+    }
+    const moved = this.zoomLevel !== 1 || this.panXValue !== 0 || this.panYValue !== 0;
+    if (this.zoomed() !== moved) this.zoomed.set(moved);
+    // Labels and their counter-scaled font only need to follow once the gesture stops.
+    if (this.zoomSettleTimer !== null) clearTimeout(this.zoomSettleTimer);
+    this.zoomSettleTimer = setTimeout(() => {
+      this.zoomSettleTimer = null;
+      if (this.labelZoom() !== this.zoomLevel) this.labelZoom.set(this.zoomLevel);
+    }, ZOOM_SETTLE_MS);
+  }
+
+  private applyCamera(): void {
+    const el = this.camera()?.nativeElement;
+    if (!el) return;
+    el.setAttribute(
+      'transform',
+      `translate(${this.panXValue},${this.panYValue}) scale(${this.zoomLevel})`,
+    );
   }
 
   // --- Camera interaction ---------------------------------------------------
@@ -822,7 +904,7 @@ export class IsometricComponent implements AfterViewInit {
     const rect = this.wrap.nativeElement.getBoundingClientRect();
     const cx = ev.clientX - rect.left;
     const cy = ev.clientY - rect.top;
-    const old = this.zoom();
+    const old = this.zoomLevel;
     // Scale by the actual scroll amount so a fast Mac trackpad flick zooms smoothly
     // instead of in big fixed steps. Normalize line/page deltas to pixels first.
     let dy = ev.deltaY;
@@ -832,21 +914,23 @@ export class IsometricComponent implements AfterViewInit {
     const next = Math.min(8, Math.max(0.25, old * factor));
     if (next === old) return;
     // Keep the point under the cursor stationary while zooming.
-    this.panX.set(cx - ((cx - this.panX()) * next) / old);
-    this.panY.set(cy - ((cy - this.panY()) * next) / old);
-    this.zoom.set(next);
+    this.panXValue = cx - ((cx - this.panXValue) * next) / old;
+    this.panYValue = cy - ((cy - this.panYValue) * next) / old;
+    this.zoomLevel = next;
+    this.scheduleCamera();
   }
 
   onPanStart(ev: MouseEvent): void {
     if (ev.button !== 0) return;
-    this.panOrigin = { x: ev.clientX, y: ev.clientY, px: this.panX(), py: this.panY() };
+    this.panOrigin = { x: ev.clientX, y: ev.clientY, px: this.panXValue, py: this.panYValue };
     this.panning.set(true);
   }
 
   onPanMove(ev: MouseEvent): void {
     if (!this.panOrigin) return;
-    this.panX.set(this.panOrigin.px + (ev.clientX - this.panOrigin.x));
-    this.panY.set(this.panOrigin.py + (ev.clientY - this.panOrigin.y));
+    this.panXValue = this.panOrigin.px + (ev.clientX - this.panOrigin.x);
+    this.panYValue = this.panOrigin.py + (ev.clientY - this.panOrigin.y);
+    this.scheduleCamera();
   }
 
   onPanEnd(): void {
@@ -903,6 +987,8 @@ export class IsometricComponent implements AfterViewInit {
       heightMetric: DisplayMetric;
       footprintMetric: DisplayMetric;
       colorMetric: DisplayMetric;
+      roads: boolean;
+      graph: ModuleGraph | null;
     },
     w: number,
     h: number,
@@ -960,11 +1046,11 @@ export class IsometricComponent implements AfterViewInit {
     }
     if (worldBoxes.length === 0) return null;
 
-    // Roads: draw an import edge between two buildings' ground centers. Reading roads() and
-    // graph() here makes the scene effect re-run when either the toggle or the graph changes.
+    // Roads: draw an import edge between two buildings' ground centers. The toggle and the
+    // graph are part of the layout inputs, so flipping either one rebuilds the scene.
     const worldRoads: WorldRoad[] = [];
-    if (this.roads()) {
-      const graph = this.moduleGraph.graph();
+    if (opts.roads) {
+      const graph = opts.graph;
       if (graph) {
         const centers = new Map<string, { x: number; y: number }>();
         for (const b of worldBoxes) {

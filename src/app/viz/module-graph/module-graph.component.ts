@@ -11,6 +11,7 @@ import {
   signal,
 } from '@angular/core';
 import { TabsStore } from '../../core/state/tabs.store';
+import { ViewSpinnerComponent } from '../../shell/view-spinner.component';
 import {
   Simulation,
   SimulationLinkDatum,
@@ -66,23 +67,21 @@ interface RenderLink {
 @Component({
   selector: 'loco-module-graph',
   standalone: true,
+  imports: [ViewSpinnerComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="wrap" #wrap>
       @if (status() === 'idle' || status() === 'building') {
-        <div class="status-overlay">
-          @if (progress(); as p) {
-            <div class="msg">
-              Building module graph…
-              <div class="bar">
-                <div class="fill" [style.width.%]="(p.done / p.total) * 100"></div>
-              </div>
-              <div class="counts">{{ p.done }} / {{ p.total }}</div>
-            </div>
-          } @else {
-            <div class="msg">Preparing module graph…</div>
-          }
-        </div>
+        @if (progress(); as p) {
+          <loco-view-spinner
+            label="Building module graph…"
+            [detail]="p.done.toLocaleString() + ' / ' + p.total.toLocaleString() + ' files scanned'"
+            [done]="p.done"
+            [total]="p.total"
+          />
+        } @else {
+          <loco-view-spinner label="Preparing module graph…" />
+        }
       } @else if (status() === 'empty') {
         <div class="status-overlay">
           <div class="msg">
@@ -211,6 +210,13 @@ interface RenderLink {
 
       @if (status() === 'ready') {
         <div class="cycles">
+          @if (omitted() > 0) {
+            <span
+              class="ok"
+              title="A force layout of every file is neither readable nor interactive at this size. The most connected files are kept."
+              >top {{ shownCount() }} of {{ shownCount() + omitted() }} files</span
+            >
+          }
           @if (cycles().length === 0) {
             <span class="ok">no import cycles</span>
           } @else {
@@ -383,6 +389,9 @@ export class ModuleGraphComponent implements AfterViewInit {
 
   readonly nodes = signal<RenderNode[]>([]);
   readonly links = signal<RenderLink[]>([]);
+  /** Files dropped from the layout by {@link MAX_GRAPH_NODES}. */
+  readonly omitted = signal(0);
+  readonly shownCount = computed(() => this.nodes().length);
   readonly status = signal<'idle' | 'building' | 'empty' | 'ready'>('idle');
   /** Narrow the graph to the files caught in an import cycle. */
   readonly onlyCycles = signal(false);
@@ -585,9 +594,19 @@ export class ModuleGraphComponent implements AfterViewInit {
   private applyFilter(filtered: ReadonlySet<string>, onlyCycles = false): void {
     if (!this.fullGraph) return;
     const inCycle = this.cycleNodes();
-    const nodes = this.fullGraph.nodes.filter(
+    const matching = this.fullGraph.nodes.filter(
       (n) => filtered.has(n.path) && (!onlyCycles || inCycle.has(n.path)),
     );
+    // A force layout is O(n log n) per tick and re-renders every node each frame, so the
+    // whole repo at once is both unreadable and unusable. Keep the best-connected files —
+    // those are the ones a dependency graph is read for — and say how many were dropped.
+    let nodes = matching;
+    if (matching.length > MAX_GRAPH_NODES) {
+      nodes = [...matching]
+        .sort((a, b) => b.inDegree + b.outDegree - (a.inDegree + a.outDegree) || b.loc - a.loc)
+        .slice(0, MAX_GRAPH_NODES);
+    }
+    this.omitted.set(matching.length - nodes.length);
     const keep = new Set(nodes.map((n) => n.path));
     const edges = this.fullGraph.edges.filter((e) => keep.has(e.from) && keep.has(e.to));
     if (nodes.length === 0) {
@@ -631,6 +650,17 @@ export class ModuleGraphComponent implements AfterViewInit {
       .alphaDecay(0.025);
     this.simulation = sim;
 
+    // Publishing positions is a full re-render of every circle, label and link, so during
+    // the settle we do it on a fixed interval rather than on all ~300 simulation ticks.
+    // The final layout is always published, from `end`.
+    let lastPublish = 0;
+    const publish = (force: boolean) => {
+      const now = performance.now();
+      if (!force && now - lastPublish < PUBLISH_EVERY_MS) return;
+      lastPublish = now;
+      tick();
+    };
+
     const tick = () => {
       const nodesOut: RenderNode[] = this.simNodes.map((sn) => ({
         id: sn.id,
@@ -661,9 +691,9 @@ export class ModuleGraphComponent implements AfterViewInit {
       this.nodes.set(nodesOut);
       this.links.set(linksOut);
     };
-    sim.on('tick', tick);
-    sim.on('end', tick);
-    tick();
+    sim.on('tick', () => publish(false));
+    sim.on('end', () => publish(true));
+    publish(true);
   }
 
   private trackPointer = (e: MouseEvent) => {
@@ -772,6 +802,15 @@ export class ModuleGraphComponent implements AfterViewInit {
     window.addEventListener('mouseup', onUp);
   }
 }
+
+/**
+ * Nodes the force layout will lay out. Beyond this the simulation stops settling in a
+ * usable time and the result is a hairball rather than a graph.
+ */
+const MAX_GRAPH_NODES = 600;
+
+/** How often settled positions are pushed to the template while the simulation runs. */
+const PUBLISH_EVERY_MS = 100;
 
 /** Last path segment — cycle tooltips would be unreadable with full paths. */
 function shortName(path: string): string {

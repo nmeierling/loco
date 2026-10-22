@@ -61,13 +61,35 @@ function normalize(filepath: string): string {
 }
 
 export function makeGitFs(files: ReadonlyMap<string, File>): GitFs {
-  // Pre-compute the set of directory paths so readdir/stat can answer for dirs
-  // (which never appear as keys in `files`).
-  const dirs = new Set<string>(['']);
+  // Directory listings are pre-indexed, not derived on demand.
+  //
+  // isomorphic-git calls readdir('objects/pack') on *every* object it cannot find in
+  // a loose object file — so once a repo is packed, that is once per tree and blob
+  // read, which is tens of thousands of calls on a real history. Scanning every key
+  // in the map to answer each one made readdir O(files) and the walk O(files ×
+  // objects): a 300-commit test repo burned 6.8M key comparisons on 15k readdir
+  // calls. One pass up front turns each call into a Map lookup.
+  const children = new Map<string, Set<string>>([['', new Set()]]);
+
+  const ensureDir = (dirPath: string): Set<string> => {
+    let set = children.get(dirPath);
+    if (set) return set;
+    set = new Set<string>();
+    children.set(dirPath, set);
+    // Link the directory into its own parent, creating ancestors as needed.
+    const slash = dirPath.lastIndexOf('/');
+    const parent = slash === -1 ? '' : dirPath.slice(0, slash);
+    const name = slash === -1 ? dirPath : dirPath.slice(slash + 1);
+    ensureDir(parent).add(name);
+    return set;
+  };
+
   for (const path of files.keys()) {
-    const parts = path.split('/');
-    for (let i = 1; i < parts.length; i++) {
-      dirs.add(parts.slice(0, i).join('/'));
+    const slash = path.lastIndexOf('/');
+    if (slash === -1) {
+      children.get('')!.add(path);
+    } else {
+      ensureDir(path.slice(0, slash)).add(path.slice(slash + 1));
     }
   }
 
@@ -106,35 +128,19 @@ export function makeGitFs(files: ReadonlyMap<string, File>): GitFs {
 
       async readdir(filepath) {
         const p = normalize(filepath);
-        if (!dirs.has(p)) {
+        const set = children.get(p);
+        if (!set) {
           if (files.has(p)) throw notDir(filepath);
           throw enoent(filepath);
         }
-        const prefix = p === '' ? '' : p + '/';
-        const out = new Set<string>();
-        for (const filePath of files.keys()) {
-          if (filePath.startsWith(prefix)) {
-            const rest = filePath.slice(prefix.length);
-            const slash = rest.indexOf('/');
-            out.add(slash >= 0 ? rest.slice(0, slash) : rest);
-          }
-        }
-        for (const dirPath of dirs) {
-          if (!dirPath || dirPath === p) continue;
-          if (dirPath.startsWith(prefix)) {
-            const rest = dirPath.slice(prefix.length);
-            const slash = rest.indexOf('/');
-            out.add(slash >= 0 ? rest.slice(0, slash) : rest);
-          }
-        }
-        return [...out];
+        return [...set];
       },
 
       async stat(filepath) {
         const p = normalize(filepath);
         const file = files.get(p);
         if (file) return fileStat(file);
-        if (dirs.has(p)) return dirStat;
+        if (children.has(p)) return dirStat;
         throw enoent(filepath);
       },
 
@@ -165,4 +171,19 @@ export function makeGitFs(files: ReadonlyMap<string, File>): GitFs {
       },
     },
   };
+}
+
+/**
+ * The subset of a dropped folder that `makeGitFs` needs: `.git/` and nothing else.
+ *
+ * The read-only operations we run (`log`, `walk` over `TREE({ ref })`, `listBranches`)
+ * never touch the working tree, so indexing the other 100k files just to throw them
+ * away on every lookup is wasted time and memory.
+ */
+export function gitDirSubset(files: ReadonlyMap<string, File>): Map<string, File> {
+  const out = new Map<string, File>();
+  for (const [path, file] of files) {
+    if (path === '.git' || path.startsWith('.git/')) out.set(path, file);
+  }
+  return out;
 }

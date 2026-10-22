@@ -1,81 +1,132 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
+import {
+  AfterViewInit,
+  ChangeDetectionStrategy,
+  Component,
+  DestroyRef,
+  ElementRef,
+  computed,
+  effect,
+  inject,
+  signal,
+  untracked,
+} from '@angular/core';
 import { AnalysisStore } from '../core/state/analysis.store';
 import { TabsStore } from '../core/state/tabs.store';
-import {
-  DirNode,
-  DisplayMetric,
-  TreeNode,
-  formatMetricValue,
-  isDir,
-  isFile,
-  metricValue,
-} from '../core/models/tree';
+import { TreeNode, formatMetricValue, isDir, isFile, metricValue } from '../core/models/tree';
+import { createSizeTracker } from '../core/perf/schedule';
 
+/** One rendered line of the tree, pre-flattened out of the nested node structure. */
+interface TreeRow {
+  path: string;
+  name: string;
+  /** Nesting level, turned into left padding. */
+  depth: number;
+  isDir: boolean;
+  expanded: boolean;
+  /** The formatted metric shown on the right. */
+  display: string;
+  title: string;
+}
+
+interface RowWindow {
+  rows: TreeRow[];
+  padTop: number;
+  padBottom: number;
+}
+
+/** Must match the `.row` height in the stylesheet — the virtual window does the maths. */
+const ROW_H = 20;
+const OVERSCAN = 10;
+/** Folders this deep and shallower start expanded on a freshly loaded project. */
+const DEFAULT_OPEN_DEPTH = 2;
+
+/**
+ * The Files sidebar tree.
+ *
+ * This used to be one component per node, recursing through the tree. That is the natural
+ * shape for a tree, but it means a 3000-file project instantiates 3000 components with
+ * their own signal graphs — and typing in the name filter force-expands everything, so
+ * every keystroke rebuilt all of them. Flattening to a row list and rendering only the
+ * slice in view keeps the cost proportional to the sidebar's height rather than the
+ * project's size, which is why the expansion state lives here now instead of per node.
+ */
 @Component({
-  selector: 'loco-tree-node',
+  selector: 'loco-directory-tree',
   standalone: true,
-  imports: [],
   changeDetection: ChangeDetectionStrategy.OnPush,
+  host: { '(scroll)': 'onScroll()' },
   template: `
-    @if (asDir(); as dir) {
-      <div class="row dir" (click)="toggle()" [class.root]="depth() === 0">
-        <span class="chev">{{ expanded() ? '▾' : '▸' }}</span>
-        <span class="icon">{{ expanded() ? '📂' : '📁' }}</span>
-        <span class="name" [title]="dir.path || rootName()">{{ dir.name || rootName() }}</span>
-        @if (dir.path) {
-          <button
-            class="filter-btn"
-            type="button"
-            (click)="setPathFilter($event, dir.path)"
-            [title]="'Filter by path: ' + dir.path"
-            aria-label="Filter by this directory"
+    @if (rows().length > 0) {
+      <div class="tree">
+        <div [style.height.px]="window().padTop"></div>
+        @for (row of window().rows; track row.path) {
+          <div
+            class="row"
+            [class.dir]="row.isDir"
+            [class.file]="!row.isDir"
+            [class.root]="row.depth === 0"
+            [class.selected]="!row.isDir && selectedPath() === row.path"
+            [style.padding-left.px]="4 + row.depth * indent"
+            [title]="row.title"
+            (click)="onRowClick(row)"
+            (dblclick)="onRowDblClick(row)"
           >
-            <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">
-              <path
-                d="M1.5 2.5h13l-5 6.2v4l-3-1v-3l-5-6.2z"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.4"
-                stroke-linejoin="round"
-              />
-            </svg>
-          </button>
+            <span class="chev">{{ row.isDir ? (row.expanded ? '▾' : '▸') : '' }}</span>
+            <span class="icon">{{ row.isDir ? (row.expanded ? '📂' : '📁') : '📄' }}</span>
+            <span class="name">{{ row.name }}</span>
+            @if (row.isDir && row.path) {
+              <button
+                class="filter-btn"
+                type="button"
+                (click)="setPathFilter($event, row.path)"
+                [title]="'Filter by path: ' + row.path"
+                aria-label="Filter by this directory"
+              >
+                <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">
+                  <path
+                    d="M1.5 2.5h13l-5 6.2v4l-3-1v-3l-5-6.2z"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.4"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </button>
+            }
+            <span class="meta">{{ row.display }}</span>
+          </div>
         }
-        <span class="meta">{{ display() }}</span>
+        <div [style.height.px]="window().padBottom"></div>
       </div>
-      @if (expanded()) {
-        <div class="children" [style.padding-left.px]="indent">
-          @for (c of sortedChildren(); track c.path) {
-            <loco-tree-node [node]="c" [depth]="depth() + 1" />
-          }
-        </div>
-      }
-    } @else if (asFile(); as f) {
-      <div
-        class="row file"
-        [class.selected]="isSelected()"
-        (click)="select()"
-        (dblclick)="openAst()"
-        [title]="f.path"
-      >
-        <span class="chev"></span>
-        <span class="icon">📄</span>
-        <span class="name">{{ f.name }}</span>
-        <span class="meta">{{ display() }}</span>
-      </div>
+    } @else {
+      <div class="empty">No tree loaded.</div>
     }
   `,
   styles: [
     `
       :host {
         display: block;
+        height: 100%;
+        overflow: auto;
+        padding: 6px 8px;
+      }
+      .tree {
+        font-size: 12px;
+      }
+      .empty {
+        opacity: 0.5;
+        padding: 12px;
       }
       .row {
         display: flex;
         align-items: center;
         gap: 4px;
-        padding: 2px 4px;
+        /* Fixed height: the virtual window turns a scroll offset into a row index. */
+        height: 20px;
+        padding-right: 4px;
+        box-sizing: border-box;
         font-size: 12px;
+        line-height: 1;
         cursor: pointer;
         user-select: none;
         border-radius: 3px;
@@ -120,6 +171,7 @@ import {
         text-align: center;
         opacity: 0.55;
         font-size: 10px;
+        flex-shrink: 0;
       }
       .icon {
         font-size: 12px;
@@ -138,94 +190,115 @@ import {
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         flex-shrink: 0;
       }
-      .children {
-        position: relative;
-      }
     `,
   ],
 })
-export class TreeNodeComponent {
+export class DirectoryTreeComponent implements AfterViewInit {
   private readonly store = inject(AnalysisStore);
   private readonly tabs = inject(TabsStore);
-
-  readonly node = input.required<TreeNode>();
-  readonly depth = input(0);
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly destroyRef = inject(DestroyRef);
 
   readonly indent = 8;
-  private readonly _expanded = signal(false);
-  /**
-   * Effective expanded state. When a name/path filter is active we force-expand
-   * every directory so matches inside collapsed folders aren't hidden; clearing
-   * the filter restores whatever the user (or default) had set.
-   */
-  readonly expanded = computed(() => {
-    if (this.filterIsActive()) return true;
-    return this._expanded();
-  });
+  readonly selectedPath = this.store.selectedPath;
+
+  /** Paths of the folders the user has open. The root folder is the empty path. */
+  private readonly open = signal<ReadonlySet<string>>(new Set());
+  private readonly scrollTop = signal(0);
+  private readonly size = createSizeTracker();
 
   /**
-   * Only the name filter triggers auto-expand — a name match deep in the tree would
-   * otherwise be invisible behind collapsed folders. The path filter is usually set
-   * by the funnel icon next to a folder the user already has in view, so we leave
-   * the user's expansion state alone in that case.
+   * Every visible line, in display order.
+   *
+   * Every file is openable (code → AST view, anything else → text/hex preview), so the
+   * tree always shows the whole project rather than pruning to AST-supported files.
    */
-  readonly filterIsActive = computed(() => {
-    const f = this.store.filters();
-    return !!f.name;
+  readonly rows = computed<TreeRow[]>(() => {
+    const root = this.store.filteredRoot();
+    if (!root) return [];
+    const metric = this.store.metric();
+    // A name filter force-expands everything: a match deep in the tree would otherwise
+    // be invisible behind a collapsed folder. The path filter is usually set from the
+    // funnel icon on a folder already in view, so it leaves expansion alone.
+    const forceOpen = this.store.nameFilterActive();
+    const open = this.open();
+    const rootName = this.store.rootName();
+
+    const out: TreeRow[] = [];
+    const visit = (node: TreeNode, depth: number): void => {
+      const dir = isDir(node);
+      const expanded = dir && (forceOpen || open.has(node.path));
+      out.push({
+        path: node.path,
+        name: depth === 0 ? node.name || rootName : node.name,
+        depth,
+        isDir: dir,
+        expanded,
+        display: formatMetricValue(metricValue(node, metric), metric),
+        title: dir ? node.path || rootName : node.path,
+      });
+      if (dir && expanded) {
+        for (const child of sortChildren(node.children)) visit(child, depth + 1);
+      }
+    };
+    visit(root, 0);
+    return out;
   });
 
-  readonly metric = computed<DisplayMetric>(() => this.store.filters().metric);
-  readonly rootName = this.store.rootName;
-
-  readonly asDir = computed<DirNode | null>(() => {
-    const n = this.node();
-    return isDir(n) ? n : null;
-  });
-  readonly asFile = computed(() => {
-    const n = this.node();
-    return isFile(n) ? n : null;
-  });
-
-  readonly value = computed(() => metricValue(this.node(), this.metric()));
-  readonly display = computed(() => formatMetricValue(this.value(), this.metric()));
-
-  readonly isSelected = computed(() => {
-    const n = this.node();
-    if (!isFile(n)) return false;
-    return this.store.selectedPath() === n.path;
+  /** Only the slice the sidebar can actually show, plus spacer heights. */
+  readonly window = computed<RowWindow>(() => {
+    const rows = this.rows();
+    const start = Math.max(0, Math.floor(this.scrollTop() / ROW_H) - OVERSCAN);
+    const count = Math.ceil(Math.max(this.size.height(), ROW_H) / ROW_H) + OVERSCAN * 2;
+    const end = Math.min(rows.length, start + count);
+    return {
+      rows: rows.slice(start, end),
+      padTop: start * ROW_H,
+      padBottom: Math.max(0, (rows.length - end) * ROW_H),
+    };
   });
 
   constructor() {
-    queueMicrotask(() => {
-      if (this.depth() < 2 && isDir(this.node())) this._expanded.set(true);
+    // A freshly loaded project opens down to DEFAULT_OPEN_DEPTH. Keyed on projectId so a
+    // background churn update, which replaces the root node, doesn't collapse the tree.
+    effect(() => {
+      this.store.projectId();
+      const root = this.store.root();
+      untracked(() => {
+        const open = new Set<string>();
+        if (root) collectOpenByDefault(root, 0, open);
+        this.open.set(open);
+        this.scrollTop.set(0);
+        this.host.nativeElement.scrollTop = 0;
+      });
     });
   }
 
-  sortedChildren(): TreeNode[] {
-    const n = this.node();
-    if (!isDir(n)) return [];
-    return [...n.children].sort((a, b) => {
-      if (isDir(a) !== isDir(b)) return isDir(a) ? -1 : 1;
-      return a.name.localeCompare(b.name);
-    });
+  ngAfterViewInit(): void {
+    this.size.attach(this.host.nativeElement, this.destroyRef);
   }
 
-  toggle(): void {
-    // Ignore manual toggles while a filter is active — the computed `expanded`
-    // is forced to true, so flipping the local signal would only silently
-    // mutate state the user can't see.
-    if (this.filterIsActive()) return;
-    this._expanded.update((v) => !v);
+  onScroll(): void {
+    this.scrollTop.set(this.host.nativeElement.scrollTop);
   }
 
-  select(): void {
-    const n = this.node();
-    if (isFile(n)) this.store.selectPath(n.path);
+  onRowClick(row: TreeRow): void {
+    if (row.isDir) {
+      // While a name filter forces everything open, a toggle would only mutate state the
+      // user cannot see — so it is ignored, exactly as it was before.
+      if (this.store.nameFilterActive()) return;
+      this.open.update((prev) => {
+        const next = new Set(prev);
+        if (!next.delete(row.path)) next.add(row.path);
+        return next;
+      });
+      return;
+    }
+    this.store.selectPath(row.path);
   }
 
-  openAst(): void {
-    const n = this.node();
-    if (isFile(n)) this.tabs.openFile(n.path);
+  onRowDblClick(row: TreeRow): void {
+    if (!row.isDir) this.tabs.openFile(row.path);
   }
 
   setPathFilter(ev: Event, path: string): void {
@@ -234,42 +307,16 @@ export class TreeNodeComponent {
   }
 }
 
-@Component({
-  selector: 'loco-directory-tree',
-  standalone: true,
-  imports: [TreeNodeComponent],
-  changeDetection: ChangeDetectionStrategy.OnPush,
-  template: `
-    @if (root(); as r) {
-      <div class="tree">
-        <loco-tree-node [node]="r" [depth]="0" />
-      </div>
-    } @else {
-      <div class="empty">No tree loaded.</div>
-    }
-  `,
-  styles: [
-    `
-      :host {
-        display: block;
-        height: 100%;
-        overflow: auto;
-        padding: 6px 8px;
-      }
-      .tree {
-        font-size: 12px;
-      }
-      .empty {
-        opacity: 0.5;
-        padding: 12px;
-      }
-    `,
-  ],
-})
-export class DirectoryTreeComponent {
-  private readonly store = inject(AnalysisStore);
+/** Folders first, then files, each alphabetical. */
+function sortChildren(children: readonly TreeNode[]): TreeNode[] {
+  return [...children].sort((a, b) => {
+    if (isDir(a) !== isDir(b)) return isDir(a) ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+}
 
-  // Every file is openable now (code → AST view, anything else → text/hex preview), so the
-  // tree always shows the whole project rather than pruning to AST-supported files.
-  readonly root = this.store.filteredRoot;
+function collectOpenByDefault(node: TreeNode, depth: number, into: Set<string>): void {
+  if (isFile(node) || depth >= DEFAULT_OPEN_DEPTH) return;
+  into.add(node.path);
+  for (const child of node.children) collectOpenByDefault(child, depth + 1, into);
 }

@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { expandFolder, loadFixture, showAstTree } from './fixtures';
 
-test.describe('AST view + source panel + call graph', () => {
+test.describe('AST view + source panel', () => {
   test('double-click a sidebar file opens the AST view with a source pane', async ({ page }) => {
     await loadFixture(page);
     await expandFolder(page, 'core');
@@ -41,26 +41,5 @@ test.describe('AST view + source panel + call graph', () => {
     await page.waitForTimeout(200);
     const highlighted = await page.locator('loco-source-panel .row.highlighted').count();
     expect(highlighted).toBeGreaterThan(5);
-  });
-
-  test('Calls toggle renders a per-file call graph for a TS file', async ({ page }) => {
-    await loadFixture(page);
-    await expandFolder(page, 'core');
-    await expandFolder(page, 'services');
-    await page
-      .locator('loco-directory-tree .row.file', { hasText: 'catalog.service.ts' })
-      .first()
-      .dblclick();
-    await expect(page.locator('loco-ast-view')).toBeVisible();
-
-    const callsBtn = page.locator('loco-ast-view .mode', { hasText: 'Calls' });
-    await expect(callsBtn).toBeEnabled();
-    await callsBtn.click();
-
-    await expect(page.locator('loco-call-graph svg circle').first()).toBeVisible({
-      timeout: 10_000,
-    });
-    const count = await page.locator('loco-call-graph svg circle').count();
-    expect(count).toBeGreaterThan(0);
   });
 });

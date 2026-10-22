@@ -22,6 +22,12 @@ interface UnusedGroup {
 type Tab = 'unused' | 'surface';
 type Bucket = 'external' | 'internal' | 'unused';
 
+/**
+ * Files listed on the unused-exports tab. Every group is rendered expanded, so an
+ * uncapped list is thousands of rows of DOM for something nobody reads past the top.
+ */
+const UNUSED_GROUP_CAP = 200;
+
 @Component({
   selector: 'loco-symbols-viz',
   standalone: true,
@@ -77,7 +83,7 @@ type Bucket = 'external' | 'internal' | 'unused';
               <code>import()</code> and string-keyed access are not tracked, so read this as a
               shortlist to check, not a delete list.
             </p>
-            @for (g of unused(); track g.path) {
+            @for (g of shownUnused(); track g.path) {
               <div class="group">
                 <div class="group-head">
                   <span class="path">{{ g.path }}</span>
@@ -91,6 +97,12 @@ type Bucket = 'external' | 'internal' | 'unused';
                   </button>
                 }
               </div>
+            }
+            @if (hiddenUnused() > 0) {
+              <p class="caveat">
+                …and {{ hiddenUnused() }} more {{ hiddenUnused() === 1 ? 'file' : 'files' }}. Narrow
+                the name or path filter in the Files sidebar to see them.
+              </p>
             }
           </div>
         }
@@ -427,6 +439,10 @@ export class SymbolsVizComponent {
   readonly unusedCount = computed(() =>
     this.unused().reduce((total, g) => total + g.defs.length, 0),
   );
+
+  /** What the list actually renders — see {@link UNUSED_GROUP_CAP}. */
+  readonly shownUnused = computed<UnusedGroup[]>(() => this.unused().slice(0, UNUSED_GROUP_CAP));
+  readonly hiddenUnused = computed(() => Math.max(0, this.unused().length - UNUSED_GROUP_CAP));
 
   readonly folders = computed<FolderSurface[]>(() => {
     this.index.index();

@@ -1,9 +1,9 @@
-import { Injectable, computed, inject, signal } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
 import { AnalysisStore } from '../state/analysis.store';
 import { ComplexityService } from './complexity.service';
 import { detectLanguage } from '../languages';
 import { walk } from '../models/tree';
-import { extractImports, extractPackage, extractTopLevelDeclarations } from './imports';
+import { mapPool, throttleProgress } from '../perf/pool';
 import { JvmResolveContext, buildJvmContext, resolveJvm, resolveSpecifier } from './module-resolve';
 
 const JVM_LANGS = new Set(['kt', 'kts', 'java']);
@@ -53,12 +53,6 @@ export class ModuleGraphService {
 
   private buildingFor: string | null = null;
 
-  constructor() {
-    this.store.root;
-    // Reset when root changes — track via a manual subscription via the root signal value.
-    // Since the store's root is a signal, we wire a small effect outside via Angular's auto tracking.
-  }
-
   /**
    * Build the module graph from the currently loaded project.
    * Idempotent for the same root identity; resets when the root changes.
@@ -76,7 +70,6 @@ export class ModuleGraphService {
       this._graph.set(empty);
       return empty;
     }
-    const rootKey = this.store.rootName() + ':' + this.buildingFor;
     const cached = this._graph();
     if (cached && this.buildingFor === this.store.rootName()) return cached;
 
@@ -102,36 +95,36 @@ export class ModuleGraphService {
     const importsByPath = new Map<string, string[]>();
     const packageByPath = new Map<string, string>();
     const declsByPath = new Map<string, string[]>();
-    let done = 0;
 
-    for (const path of candidates) {
-      const file = blobs.get(path);
-      const langId = langByPath.get(path);
-      if (!file || !langId) {
-        done++;
-        continue;
-      }
-      try {
-        const text = await file.text();
-        const ast = await this.complexity.parse(text, langId);
-        if (ast) {
-          const specs = extractImports(ast, langId).map((i) => i.specifier);
-          if (specs.length > 0) importsByPath.set(path, specs);
-          if (JVM_LANGS.has(langId)) {
-            const pkg = extractPackage(ast, langId);
-            if (pkg) packageByPath.set(path, pkg);
-            const decls = extractTopLevelDeclarations(ast, langId);
-            if (decls.length > 0) declsByPath.set(path, decls);
-          }
-        }
-      } catch {
-        // skip
-      }
-      done++;
-      const p = { done, total };
+    this.building.set({ done: 0, total });
+    const onProgress = throttleProgress((done, t) => {
+      const p = { done, total: t };
       this.building.set(p);
       progress?.(p);
-      if (done % 4 === 0) await new Promise((r) => setTimeout(r, 0));
+    });
+
+    // The extraction runs inside the worker, so each file costs one small message
+    // rather than a full AST clone — and the pool keeps every core busy.
+    const scans = await mapPool(
+      candidates,
+      this.complexity.concurrency,
+      async (path) => {
+        const file = blobs.get(path);
+        const langId = langByPath.get(path);
+        if (!file || !langId) return null;
+        const text = await file.text();
+        return this.complexity.scanImports(text, langId, JVM_LANGS.has(langId));
+      },
+      onProgress,
+    );
+
+    for (let i = 0; i < candidates.length; i++) {
+      const path = candidates[i]!;
+      const scan = scans[i];
+      if (!scan) continue;
+      if (scan.specifiers.length > 0) importsByPath.set(path, scan.specifiers);
+      if (scan.pkg) packageByPath.set(path, scan.pkg);
+      if (scan.decls.length > 0) declsByPath.set(path, scan.decls);
     }
 
     // Build Kotlin package indices once for the whole repo
@@ -152,7 +145,7 @@ export class ModuleGraphService {
     const edgeKeys = new Set<string>();
     const addEdge = (from: string, to: string) => {
       if (from === to) return;
-      const key = from + '' + to;
+      const key = from + '\n' + to;
       if (edgeKeys.has(key)) return;
       edgeKeys.add(key);
       edges.push({ from, to });
@@ -300,4 +293,3 @@ export function findCycles(paths: readonly string[], edges: readonly GraphEdge[]
 
   return cycles.sort((a, b) => b.length - a.length || (a[0] ?? '').localeCompare(b[0] ?? ''));
 }
-

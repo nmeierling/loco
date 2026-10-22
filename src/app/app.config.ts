@@ -14,6 +14,8 @@ import { MetricListComponent } from './viz/list/metric-list.component';
 import { SymbolsVizComponent } from './viz/symbols/symbols.component';
 import { ComplexityDepthComponent } from './viz/complexity-depth/complexity-depth.component';
 import { IsometricComponent } from './viz/isometric/isometric.component';
+import { DomainBoardComponent } from './viz/domain-board/domain-board.component';
+import { GitViewComponent } from './viz/git/git.component';
 
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -74,6 +76,20 @@ export const appConfig: ApplicationConfig = {
         description:
           'Files as buildings on an isometric plane — height, footprint and color each a metric.',
         component: IsometricComponent,
+      });
+      registry.register({
+        id: 'git',
+        label: 'Git',
+        description:
+          'Branches, tags and `.git` size, plus the newest commits as a lane graph.',
+        component: GitViewComponent,
+      });
+      registry.register({
+        id: 'domain-board',
+        label: 'Domain board',
+        description:
+          'A whiteboard that chunks your symbol names into domains by shared terms — draggable, editable and saved locally.',
+        component: DomainBoardComponent,
       });
     }),
   ],

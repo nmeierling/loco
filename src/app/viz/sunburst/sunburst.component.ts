@@ -6,7 +6,6 @@ import {
   ElementRef,
   ViewChild,
   computed,
-  effect,
   inject,
   signal,
 } from '@angular/core';
@@ -16,7 +15,18 @@ import { arc as d3arc } from 'd3-shape';
 import { scaleOrdinal } from 'd3-scale';
 import { schemeTableau10 } from 'd3-scale-chromatic';
 import { AnalysisStore } from '../../core/state/analysis.store';
-import { DirNode, DisplayMetric, TreeNode, isDir, isFile, metricValue } from '../../core/models/tree';
+import { deferredLayout } from '../../core/perf/deferred';
+import { createSizeTracker } from '../../core/perf/schedule';
+import { ViewSpinnerComponent } from '../../shell/view-spinner.component';
+import {
+  DirNode,
+  DisplayMetric,
+  TreeNode,
+  fileCount,
+  isDir,
+  isFile,
+  metricValue,
+} from '../../core/models/tree';
 
 interface Segment {
   path: string;
@@ -33,9 +43,13 @@ interface Segment {
 @Component({
   selector: 'loco-sunburst',
   standalone: true,
+  imports: [ViewSpinnerComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="wrap" #wrap>
+      @if (building()) {
+        <loco-view-spinner label="Laying out sunburst…" [detail]="buildingDetail()" />
+      }
       @if (segments().length === 0) {
         <div class="empty">No data to chart.</div>
       } @else {
@@ -135,10 +149,31 @@ export class SunburstComponent implements AfterViewInit {
 
   @ViewChild('wrap', { static: true }) wrap!: ElementRef<HTMLDivElement>;
 
-  readonly width = signal(0);
-  readonly height = signal(0);
-  readonly segments = signal<Segment[]>([]);
+  private readonly size = createSizeTracker();
+  readonly width = this.size.width;
+  readonly height = this.size.height;
   readonly selectedPath = this.store.selectedPath;
+
+  /** Ring geometry — one arc path string per node, so it is well worth deferring. */
+  private readonly view = deferredLayout({
+    inputs: () => ({
+      root: this.store.filteredRoot(),
+      metric: this.store.metric(),
+      w: this.size.settledWidth(),
+      h: this.size.settledHeight(),
+    }),
+    build: ({ root, metric, w, h }) => this.layout(root, metric, w, h),
+    initial: [] as Segment[],
+    weight: ({ root }) => (root ? fileCount(root) : 0),
+  });
+
+  readonly segments = this.view.value;
+  readonly building = this.view.building;
+  readonly buildingDetail = computed(() => {
+    const root = this.store.filteredRoot();
+    const n = root ? fileCount(root) : 0;
+    return n > 0 ? `${n.toLocaleString()} files` : null;
+  });
   readonly hover = signal<string | null>(null);
   readonly tipPos = signal<{ x: number; y: number }>({ x: 0, y: 0 });
 
@@ -148,27 +183,8 @@ export class SunburstComponent implements AfterViewInit {
     return this.segments().find((s) => s.path === id) ?? null;
   });
 
-  constructor() {
-    effect(() => {
-      const root = this.store.filteredRoot();
-      const metric = this.store.filters().metric;
-      const w = this.width();
-      const h = this.height();
-      this.segments.set(this.layout(root, metric, w, h));
-    });
-  }
-
   ngAfterViewInit(): void {
-    const el = this.wrap.nativeElement;
-    const ro = new ResizeObserver((entries) => {
-      for (const e of entries) {
-        const r = e.contentRect;
-        this.width.set(Math.max(0, Math.floor(r.width)));
-        this.height.set(Math.max(0, Math.floor(r.height)));
-      }
-    });
-    ro.observe(el);
-    this.destroyRef.onDestroy(() => ro.disconnect());
+    this.size.attach(this.wrap.nativeElement, this.destroyRef);
   }
 
   onClick(s: Segment): void {

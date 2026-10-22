@@ -2,6 +2,7 @@ import { Injectable, inject, signal } from '@angular/core';
 import { AnalysisStore } from '../state/analysis.store';
 import { TabsStore } from '../state/tabs.store';
 import { IgnoreService } from './ignore.service';
+import { GitWorkerService } from './git-worker.service';
 import {
   MAX_SESSION_BYTES,
   SESSION_SCHEMA_VERSION,
@@ -23,6 +24,7 @@ export class SessionService {
   private readonly tabs = inject(TabsStore);
   private readonly ig = inject(IgnoreService);
   private readonly db = inject(SessionStoreService);
+  private readonly gitWorker = inject(GitWorkerService);
 
   /** True while start-up is still deciding whether there is a session to restore. */
   readonly restoring = signal(true);
@@ -50,6 +52,10 @@ export class SessionService {
       this.ig.clearUserPatterns();
       for (const p of meta.ignorePatterns) this.ig.addUserPattern(p);
 
+      // A snapshot has no `.git/` (deliberately — it is large and churn is folded into
+      // the cached tree). Clear the worker so the Git view reports "no history" rather
+      // than answering from a repo analysed earlier in this same page session.
+      this.gitWorker.detach();
       this.store.setRoot(meta.tree, meta.rootName, files);
       this.store.filters.set(meta.filters);
       this.store.selectPath(meta.selectedPath);

@@ -53,7 +53,10 @@ interface MetricOption {
 
       <span class="spacer"></span>
 
-      <label class="metric" [title]="metricTitle(metric()) || 'Value shown next to each file/folder'">
+      <label
+        class="metric"
+        [title]="metricTitle(metric()) || 'Value shown next to each file/folder'"
+      >
         <select [ngModel]="metric()" (ngModelChange)="setMetric($event)">
           @for (m of metrics; track m.id) {
             <option [value]="m.id" [disabled]="isMetricDisabled(m.id)" [title]="metricTitle(m.id)">
@@ -264,7 +267,7 @@ export class FileBrowserComponent {
   readonly collapse = output<void>();
 
   readonly filters = this.store.filters;
-  readonly metric = computed<DisplayMetric>(() => this.store.filters().metric);
+  readonly metric = this.store.metric;
 
   readonly metrics: MetricOption[] = [
     { id: 'count', label: 'File count' },
@@ -344,6 +347,15 @@ export class FileBrowserComponent {
     if (metric === 'risk') void this.risk.ensure();
   }
 
+  /**
+   * Filter text is applied straight away, deliberately.
+   *
+   * It is tempting to debounce this — `filters()` feeds `filteredRoot()`, which every
+   * viz keys off — but the filter is also how the user finds a file, so a delay here is
+   * felt immediately. The expensive half is instead coalesced downstream: each viz
+   * rebuilds its layout after the next paint and cancels a pending rebuild when the
+   * filter changes again, so fast typing costs one layout rather than one per keystroke.
+   */
   setName(name: string): void {
     this.store.updateFilters({ name });
   }

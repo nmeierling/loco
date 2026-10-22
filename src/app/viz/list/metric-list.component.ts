@@ -15,7 +15,16 @@ import { FormsModule } from '@angular/forms';
 import { TabsStore } from '../../core/state/tabs.store';
 import { AnalysisStore } from '../../core/state/analysis.store';
 import { IgnoreService } from '../../core/services/ignore.service';
-import { FileNode, MetricKind, TreeNode, fileCount, formatSize, isFile } from '../../core/models/tree';
+import { deferredLayout } from '../../core/perf/deferred';
+import { ViewSpinnerComponent } from '../../shell/view-spinner.component';
+import {
+  FileNode,
+  MetricKind,
+  TreeNode,
+  fileCount,
+  formatSize,
+  isFile,
+} from '../../core/models/tree';
 
 /** Numeric columns: the stored metrics plus the derived `size`. */
 type NumKey = MetricKind | 'size';
@@ -68,6 +77,8 @@ type EmptyReason =
 
 const ROW_H = 26;
 const OVERSCAN = 8;
+/** Row counts above this get the deferred build + spinner; below it, the sort is inline. */
+const ROWS_DEFER_ABOVE = 2000;
 const METRIC_LABELS: Record<MetricKind, string> = {
   loc: 'LOC',
   complexity: 'Complexity',
@@ -79,10 +90,13 @@ const METRICS: MetricKind[] = ['loc', 'complexity', 'churn', 'risk'];
 @Component({
   selector: 'loco-metric-list',
   standalone: true,
-  imports: [FormsModule, DecimalPipe],
+  imports: [FormsModule, DecimalPipe, ViewSpinnerComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="wrap">
+      @if (building()) {
+        <loco-view-spinner label="Sorting files…" [detail]="buildingDetail()" />
+      }
       <div class="controls">
         <label class="pick">
           <span class="cap">lang</span>
@@ -211,6 +225,7 @@ const METRICS: MetricKind[] = ['loc', 'complexity', 'churn', 'risk'];
         height: 100%;
       }
       .wrap {
+        position: relative;
         display: flex;
         flex-direction: column;
         width: 100%;
@@ -531,23 +546,45 @@ export class MetricListComponent {
     return [...set].sort((a, b) => a.localeCompare(b));
   });
 
-  /** Rows after the list-local filters, ordered by the active sort. */
-  readonly rows = computed<Row[]>(() => {
-    const lang = this.language();
-    const mins = this.mins();
-    const kept = this.allRows().filter((r) => {
-      if (lang && r.language !== lang) return false;
-      for (const m of METRICS) {
-        const min = mins[m];
-        if (min === null || min === undefined) continue;
-        const v = r[m];
-        if (v === null || v < min) return false;
-      }
-      return true;
-    });
-    const key = this.sortKey();
-    const dir = this.sortDir();
-    return kept.sort((a, b) => compare(a, b, key, dir));
+  /**
+   * Rows after the list-local filters, ordered by the active sort.
+   *
+   * Filtering and sorting a few thousand rows is a single blocking chunk of work on the
+   * render path — long enough to swallow the click that triggered it. Past
+   * {@link ROWS_DEFER_ABOVE} it runs behind the in-view spinner instead; below that it
+   * stays inline, since a spinner for a two-millisecond sort is just a flash.
+   */
+  private readonly rowsView = deferredLayout({
+    inputs: () => ({
+      all: this.allRows(),
+      lang: this.language(),
+      mins: this.mins(),
+      key: this.sortKey(),
+      dir: this.sortDir(),
+    }),
+    build: ({ all, lang, mins, key, dir }) => {
+      const kept = all.filter((r) => {
+        if (lang && r.language !== lang) return false;
+        for (const m of METRICS) {
+          const min = mins[m];
+          if (min === null || min === undefined) continue;
+          const v = r[m];
+          if (v === null || v < min) return false;
+        }
+        return true;
+      });
+      return kept.sort((a, b) => compare(a, b, key, dir));
+    },
+    initial: [] as Row[],
+    weight: ({ all }) => all.length,
+    threshold: ROWS_DEFER_ABOVE,
+  });
+
+  readonly rows = this.rowsView.value;
+  readonly building = this.rowsView.building;
+  readonly buildingDetail = computed(() => {
+    const n = this.allRows().length;
+    return n > 0 ? `${n.toLocaleString()} files` : null;
   });
 
   /** Column maxima, for the in-cell magnitude bars. Recomputed from the visible rows. */
@@ -613,7 +650,7 @@ export class MetricListComponent {
     // Follow the chosen metric: picking one ranks the list by it. `count` has no per-file
     // column (every file is 1), so it leaves the list's own sort untouched.
     effect(() => {
-      const metric = this.store.filters().metric;
+      const metric = this.store.metric();
       if (metric === 'count') return;
       untracked(() => {
         this.sortKey.set(metric);
@@ -710,12 +747,7 @@ function toRow(f: FileNode): Row {
   };
 }
 
-function cellView(
-  r: Row,
-  c: Column,
-  max: Record<NumKey, number>,
-  churnPending: boolean,
-): CellView {
+function cellView(r: Row, c: Column, max: Record<NumKey, number>, churnPending: boolean): CellView {
   if (!c.numeric) {
     const raw = c.key === 'name' ? r.name : c.key === 'dir' ? r.dir : (r.language ?? '—');
     return { key: c.key, numeric: false, text: raw, pct: 0 };

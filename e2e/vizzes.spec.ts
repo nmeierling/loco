@@ -219,13 +219,18 @@ test.describe('Alternative vizzes (sunburst, module graph, dep matrix)', () => {
     await selectViz(page, 'Dep matrix');
     await page.waitForSelector('loco-dependency-matrix svg rect');
 
-    const folderCells = await page.locator('loco-dependency-matrix svg rect').count();
+    const rows = page.locator('loco-dependency-matrix g.row-labels text');
+    const folderRows = await rows.count();
     await page.locator('loco-dependency-matrix .chip', { hasText: 'Files' }).click();
 
-    await expect
-      .poll(() => page.locator('loco-dependency-matrix svg rect').count())
-      .toBeGreaterThan(folderCells);
-    const fileCells = await page.locator('loco-dependency-matrix svg rect').count();
-    expect(fileCells).toBeGreaterThan(100); // n*n + the background rect
+    // Rows, not rects: the grid only paints the diagonal and the cells that actually
+    // carry an import, so the rect count no longer tracks the number of rows.
+    await expect.poll(() => rows.count()).toBeGreaterThan(folderRows);
+    const fileRows = await rows.count();
+    await expect(page.locator('loco-dependency-matrix .count')).toHaveText(
+      `${fileRows} × ${fileRows}`,
+    );
+    // Every row is a file now, so every label ends in a file extension.
+    for (const t of await rows.allTextContents()) expect(t.trim()).toMatch(/\.\w+$/);
   });
 });

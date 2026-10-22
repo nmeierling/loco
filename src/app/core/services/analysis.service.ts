@@ -5,8 +5,11 @@ import { LocInput, LocService } from './loc.service';
 import { IgnoreService } from './ignore.service';
 import { ComplexityService } from './complexity.service';
 import { GitChurnService } from './git-churn.service';
+import { GitWorkerDetachedError, GitWorkerService } from './git-worker.service';
+import { GitRepoService } from './git-repo.service';
 import { SessionService } from './session.service';
 import { DirNode, FileNode } from '../models/tree';
+import { mapPool, throttleProgress } from '../perf/pool';
 import { detectLanguage, extOf } from '../languages';
 
 @Injectable({ providedIn: 'root' })
@@ -16,6 +19,8 @@ export class AnalysisService {
   private readonly ig = inject(IgnoreService);
   private readonly complexity = inject(ComplexityService);
   private readonly churn = inject(GitChurnService);
+  private readonly gitWorker = inject(GitWorkerService);
+  private readonly gitRepo = inject(GitRepoService);
   private readonly session = inject(SessionService);
 
   async analyze(load: LoadResult): Promise<void> {
@@ -27,10 +32,19 @@ export class AnalysisService {
     const allFilesMap = new Map<string, File>();
     for (const f of load.files) allFilesMap.set(f.path, f.file);
 
+    // Hand `.git/` to the git worker before anything else, so the Git view and the
+    // churn walk can both start from it.
+    this.gitWorker.attach(allFilesMap);
+    this.gitRepo.reset();
+
     const gitignorePatterns = await this.collectGitignores(load.files);
     this.ig.setGitignorePatterns(gitignorePatterns);
     const ig = this.ig.analysisIgnore();
-    const accepted = load.files.filter((f) => !ig.ignores(f.path));
+    // `.git/` is ignored by the very first default pattern, but `ignore` still runs the
+    // path through every compiled pattern to find that out. On a packed repo `.git/`
+    // can be the majority of the dropped files, so testing them is most of the work
+    // this filter does — and the answer is known from the prefix alone.
+    const accepted = load.files.filter((f) => !isGitInternal(f.path) && !ig.ignores(f.path));
 
     const inputs: LocInput[] = accepted.map((f, i) => ({
       id: i,
@@ -70,7 +84,7 @@ export class AnalysisService {
     for (const input of inputs) blobs.set(input.path, input.file);
 
     this.logGitDetection(allFilesMap);
-    const hasGit = this.churn.hasGitDir(allFilesMap);
+    const hasGit = this.churn.hasGitDir();
     this.store.churn.set(hasGit ? { status: 'pending' } : { status: 'unavailable' });
 
     const root = buildTree(load.rootName, fileNodes);
@@ -85,21 +99,18 @@ export class AnalysisService {
     // depends on it, so it runs after the tree is up and folds its results in later.
     if (hasGit) {
       const forProject = this.store.projectId();
-      void this.refineChurn(allFilesMap, forProject);
+      void this.refineChurn(forProject);
     }
   }
 
-  private async refineChurn(
-    allFiles: ReadonlyMap<string, File>,
-    forProject: number,
-  ): Promise<void> {
+  private async refineChurn(forProject: number): Promise<void> {
     /** The user may swap folders mid-walk; results from the old project are dropped. */
     const stale = (): boolean => this.store.projectId() !== forProject;
 
     this.store.churn.set({ status: 'running', done: 0, total: 0 });
     try {
       console.info('[loco] churn: walking git history…');
-      const result = await this.churn.churnByPath(allFiles, (p) => {
+      const result = await this.churn.churnByPath((p) => {
         if (!stale()) this.store.churn.set({ status: 'running', done: p.done, total: p.total });
       });
       if (stale()) return;
@@ -124,6 +135,9 @@ export class AnalysisService {
         [...result.countByPath.keys()].slice(0, 5),
       );
     } catch (e) {
+      // A folder swap tears the worker down mid-walk. Nobody wants this result any
+      // more, and the new analysis has already set its own churn state.
+      if (e instanceof GitWorkerDetachedError) return;
       // Don't fail the whole analysis if git parsing breaks — just leave churn null.
       console.warn('[loco] git churn computation failed', e);
       if (!stale()) {
@@ -142,8 +156,18 @@ export class AnalysisService {
    * parent of the actual repo).
    */
   private logGitDetection(files: ReadonlyMap<string, File>): void {
-    const gitFiles = [...files.keys()].filter((p) => p.includes('.git/'));
-    if (gitFiles.length === 0) {
+    // One pass, keeping only a handful of samples — on a packed repo `.git/` is tens of
+    // thousands of entries and materialising them all just to log five is wasteful.
+    let gitFileCount = 0;
+    const gitFiles: string[] = [];
+    const heads: string[] = [];
+    for (const p of files.keys()) {
+      if (!p.includes('.git/')) continue;
+      gitFileCount++;
+      if (gitFiles.length < 5) gitFiles.push(p);
+      if (/(^|\/)\.git\/HEAD$/.test(p)) heads.push(p);
+    }
+    if (gitFileCount === 0) {
       console.info(
         '[loco] git churn: no .git/ files in the dropped folder — Churn chip will stay hidden. ' +
           'Make sure you dropped the project root (the folder that contains .git/) and that your ' +
@@ -151,13 +175,12 @@ export class AnalysisService {
       );
       return;
     }
-    const heads = gitFiles.filter((p) => /(^|\/)\.git\/HEAD$/.test(p));
     console.info(
       '[loco] git churn: found %d .git/* files in the upload, %d of them are HEAD files. ' +
         'Sample paths: %o',
-      gitFiles.length,
+      gitFileCount,
       heads.length,
-      gitFiles.slice(0, 5),
+      gitFiles,
     );
     if (heads.length === 0) {
       console.warn(
@@ -175,6 +198,15 @@ export class AnalysisService {
     }
   }
 
+  /**
+   * Replaces the regex heuristic with a real tree-sitter branch count, for the files
+   * whose language we have a grammar for.
+   *
+   * This runs across the whole worker pool: the parses are independent, and doing them
+   * one-at-a-time left every core but one idle through the longest phase of the load.
+   * Progress is throttled — the user cannot read 3000 counter updates, but Angular
+   * would happily schedule 3000 change-detection passes for them.
+   */
   private async refineComplexity(inputs: LocInput[], fileNodes: FileNode[]): Promise<void> {
     const targets: number[] = [];
     for (let i = 0; i < inputs.length; i++) {
@@ -186,35 +218,36 @@ export class AnalysisService {
     if (targets.length === 0) return;
 
     this.store.status.set({ phase: 'parsing', done: 0, total: targets.length });
+    const onProgress = throttleProgress((done, total) =>
+      this.store.status.set({ phase: 'parsing', done, total }),
+    );
 
-    let done = 0;
-    for (const idx of targets) {
-      const input = inputs[idx];
-      const node = fileNodes[idx];
-      if (!input || !node || !input.language) continue;
-      try {
+    await mapPool(
+      targets,
+      this.complexity.concurrency,
+      async (idx) => {
+        const input = inputs[idx];
+        const node = fileNodes[idx];
+        if (!input || !node || !input.language) return null;
         const text = await input.file.text();
         const cx = await this.complexity.compute(text, input.language.id);
-        if (cx !== null) {
-          node.metrics = { ...node.metrics, complexity: cx };
-        }
-      } catch {
-        // leave heuristic complexity in place
-      }
-      done++;
-      if (done % 4 === 0 || done === targets.length) {
-        this.store.status.set({ phase: 'parsing', done, total: targets.length });
-        await new Promise((r) => setTimeout(r, 0));
-      }
-    }
+        // A failed parse leaves the heuristic complexity in place.
+        if (cx !== null) node.metrics = { ...node.metrics, complexity: cx };
+        return null;
+      },
+      onProgress,
+    );
   }
 
   private async collectGitignores(files: { path: string; file: File }[]): Promise<string[]> {
     const patterns: string[] = [];
     const gitignores = files.filter((f) => f.path.endsWith('.gitignore'));
-    for (const gi of gitignores) {
+    const texts = await Promise.all(gitignores.map((gi) => gi.file.text().catch(() => null)));
+    for (let i = 0; i < gitignores.length; i++) {
+      const gi = gitignores[i]!;
       try {
-        const text = await gi.file.text();
+        const text = texts[i];
+        if (text === null || text === undefined) continue;
         const dir = gi.path.replace(/\.gitignore$/, '');
         for (const raw of text.split(/\r?\n/)) {
           const line = raw.trim();
@@ -234,6 +267,11 @@ export class AnalysisService {
     }
     return patterns;
   }
+}
+
+/** Git's own object store — mined for history, never shown as source. */
+function isGitInternal(path: string): boolean {
+  return path.startsWith('.git/');
 }
 
 function buildTree(rootName: string, files: FileNode[]): DirNode {

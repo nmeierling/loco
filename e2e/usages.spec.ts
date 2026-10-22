@@ -35,12 +35,12 @@ test.describe('AST usages panel', () => {
     await page.locator('loco-ast-view .mode', { hasText: 'Usages' }).click();
 
     await page.locator('loco-usages-panel .grp-head', { hasText: 'CartComponent' }).first().click();
-    await page
-      .locator('loco-usages-panel .mem-head', { hasText: 'selectProduct' })
-      .first()
-      .click();
 
-    const refs = page.locator('loco-usages-panel .ref');
+    // Expanding the class lists each member with its call sites already under it. The
+    // member header is a jump-to-declaration button, not a second expander — clicking it
+    // here would open another tab and hide the panel these assertions run against.
+    const member = page.locator('loco-usages-panel .mem', { hasText: 'selectProduct' }).first();
+    const refs = member.locator('.ref');
     await expect(refs.first()).toBeVisible();
     await expect(refs.first().locator('code')).toContainText('selectProduct');
 
@@ -73,13 +73,17 @@ test.describe('AST usages panel', () => {
     await expect(store).toBeVisible();
     await expect(store).toContainText('app/core/state/catalog.store.ts');
 
-    // The members it calls are listed, and each expands to sites inside this file.
+    // The members it calls are listed, each with the sites inside this file under it.
     await store.click();
-    const method = page.locator('loco-usages-panel .mem-head', { hasText: 'selectProduct' }).first();
-    await expect(method).toBeVisible();
-    await method.click();
-    const refs = page.locator('loco-usages-panel .ref');
-    await expect(refs.filter({ hasText: 'selectProduct' }).first()).toBeVisible();
+    const member = page.locator('loco-usages-panel .mem', { hasText: 'selectProduct' }).first();
+    await expect(member.locator('.mem-head')).toContainText('CatalogStore.selectProduct');
+    await expect(member.locator('.ref').filter({ hasText: 'selectProduct' }).first()).toBeVisible();
+
+    // The member header jumps to the declaration rather than expanding anything.
+    await member.locator('.mem-head').click();
+    await expect
+      .poll(() => page.locator('loco-ast-view:visible .path').textContent())
+      .toContain('catalog.store.ts');
   });
 
   test('the External tab groups third-party dependencies by module', async ({ page }) => {
@@ -89,18 +93,18 @@ test.describe('AST usages panel', () => {
 
     await page.locator('loco-usages-panel .tabs button', { hasText: 'External' }).click();
 
-    // cart.component imports Subject from rxjs — the one out-of-repo dependency.
+    // cart.component imports Subject from rxjs — the one out-of-repo dependency. Out here
+    // a group is one imported symbol tagged with the module it came from, and it opens
+    // straight onto the usage sites; there is no per-member level.
     const dep = page.locator('loco-usages-panel .grp-head', { hasText: 'rxjs' }).first();
     await expect(dep).toBeVisible();
+    await expect(dep).toContainText('Subject');
     await expect(dep).toContainText(/\d+×/);
 
     await dep.click();
-    const member = page.locator('loco-usages-panel .mem-head', { hasText: 'Subject' }).first();
-    await expect(member).toBeVisible();
-
-    // Its usage sites (the import and the `new Subject()`) are listed and jump within the file.
-    await member.click();
-    await expect(page.locator('loco-usages-panel .ref').first()).toBeVisible();
+    const ref = page.locator('loco-usages-panel .ref').first();
+    await expect(ref).toBeVisible();
+    await expect(ref.locator('code')).toContainText('Subject');
   });
 
   test('the Self tab ranks a file’s members by how often it uses them itself', async ({ page }) => {
@@ -117,9 +121,7 @@ test.describe('AST usages panel', () => {
     await expect(rows.filter({ hasText: 'products' }).first()).toBeVisible();
 
     // Counts are non-increasing down the list.
-    const counts = await page
-      .locator('loco-usages-panel .sym-head .badge')
-      .allTextContents();
+    const counts = await page.locator('loco-usages-panel .sym-head .badge').allTextContents();
     const nums = counts.map((c) => Number(c.replace(/[^\d]/g, '')));
     for (let i = 1; i < nums.length; i++) expect(nums[i]).toBeLessThanOrEqual(nums[i - 1]);
 

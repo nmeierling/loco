@@ -6,7 +6,6 @@ import {
   ElementRef,
   ViewChild,
   computed,
-  effect,
   inject,
   signal,
 } from '@angular/core';
@@ -16,6 +15,9 @@ import { interpolateYlOrRd } from 'd3-scale-chromatic';
 import { scaleSequential } from 'd3-scale';
 import { AnalysisStore } from '../../core/state/analysis.store';
 import { IgnoreService } from '../../core/services/ignore.service';
+import { deferredLayout } from '../../core/perf/deferred';
+import { createSizeTracker } from '../../core/perf/schedule';
+import { ViewSpinnerComponent } from '../../shell/view-spinner.component';
 import {
   DirNode,
   DisplayMetric,
@@ -56,9 +58,13 @@ interface TileDatum {
 @Component({
   selector: 'loco-treemap',
   standalone: true,
+  imports: [ViewSpinnerComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="wrap" #wrap>
+      @if (building()) {
+        <loco-view-spinner label="Laying out treemap…" [detail]="buildingDetail()" />
+      }
       @if (emptyReason(); as e) {
         <div class="empty">
           @switch (e.kind) {
@@ -363,10 +369,34 @@ export class TreemapComponent implements AfterViewInit {
 
   @ViewChild('wrap', { static: true }) wrap!: ElementRef<HTMLDivElement>;
 
-  readonly width = signal(0);
-  readonly height = signal(0);
-  readonly tiles = signal<TileDatum[]>([]);
+  private readonly size = createSizeTracker();
+  readonly width = this.size.width;
+  readonly height = this.size.height;
   readonly legend = signal<{ stops: string[]; min: number; max: number } | null>(null);
+
+  /**
+   * Tile geometry. The squarify pass over a few thousand nodes is well past the point
+   * where doing it inline freezes the frame, so it runs after the spinner has painted.
+   */
+  private readonly view = deferredLayout({
+    inputs: () => ({
+      root: this.store.filteredRoot(),
+      metric: this.store.metric(),
+      w: this.size.settledWidth(),
+      h: this.size.settledHeight(),
+    }),
+    build: ({ root, metric, w, h }) => this.layout(root, metric, w, h),
+    initial: [] as TileDatum[],
+    weight: ({ root }) => (root ? fileCount(root) : 0),
+  });
+
+  readonly tiles = this.view.value;
+  readonly building = this.view.building;
+  readonly buildingDetail = computed(() => {
+    const root = this.store.filteredRoot();
+    const n = root ? fileCount(root) : 0;
+    return n > 0 ? `${n.toLocaleString()} files` : null;
+  });
   readonly tip = signal<{
     x: number;
     y: number;
@@ -397,7 +427,7 @@ export class TreemapComponent implements AfterViewInit {
     // We have visible files but the metric value sum is 0 (e.g. churn with no
     // churn data, or all files at LOC=0). The chip disabling already prevents
     // most of these, but it's still possible for narrow filtered subsets.
-    const metric = this.store.filters().metric;
+    const metric = this.store.metric();
     if (metric === 'risk') {
       const r = this.store.risk();
       if (r.status === 'computing' || r.status === 'idle') return { kind: 'risk-loading' };
@@ -416,27 +446,8 @@ export class TreemapComponent implements AfterViewInit {
     this.store.updateFilters({ name: '', path: '' });
   }
 
-  constructor() {
-    effect(() => {
-      const root = this.store.filteredRoot();
-      const metric = this.store.filters().metric;
-      const w = this.width();
-      const h = this.height();
-      this.tiles.set(this.layout(root, metric, w, h));
-    });
-  }
-
   ngAfterViewInit(): void {
-    const el = this.wrap.nativeElement;
-    const ro = new ResizeObserver((entries) => {
-      for (const e of entries) {
-        const r = e.contentRect;
-        this.width.set(Math.max(0, Math.floor(r.width)));
-        this.height.set(Math.max(0, Math.floor(r.height)));
-      }
-    });
-    ro.observe(el);
-    this.destroyRef.onDestroy(() => ro.disconnect());
+    this.size.attach(this.wrap.nativeElement, this.destroyRef);
   }
 
   onHover(ev: MouseEvent, t: TileDatum): void {

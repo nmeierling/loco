@@ -2,6 +2,16 @@
 
 import Parser from 'web-tree-sitter';
 import { LANG_MAP, SUPPORTED_LANG_IDS } from '../services/treesitter-langs';
+import { extractImports, extractPackage, extractTopLevelDeclarations } from '../services/imports';
+import {
+  FileSymbol,
+  ImportBinding,
+  RawRef,
+  extractFileSymbols,
+  extractImportBindings,
+  extractRawRefs,
+} from '../services/symbols';
+import { perSymbolComplexity } from '../services/symbol-complexity';
 
 export interface AstNodeWire {
   type: string;
@@ -22,6 +32,29 @@ export interface HighlightTokenWire {
   endRow: number;
   endCol: number;
   kind: TokenKind;
+}
+
+/**
+ * What the module graph needs from a file. Extracting it here instead of shipping the
+ * whole AST across the wire is the difference between a few hundred bytes and a
+ * multi-megabyte structured clone per file.
+ */
+export interface ImportScanWire {
+  specifiers: string[];
+  /** JVM only: the file's `package` declaration. */
+  pkg: string | null;
+  /** JVM only: top-level type/function names the package exposes. */
+  decls: string[];
+}
+
+/** What the symbol index needs from a file — same deal as {@link ImportScanWire}. */
+export interface SymbolScanWire {
+  symbols: FileSymbol[];
+  bindings: ImportBinding[];
+  refs: RawRef[];
+  pkg: string | null;
+  /** Branch count per symbol, aligned index-for-index with `symbols`. */
+  complexity: number[];
 }
 
 interface InitMsg {
@@ -51,7 +84,29 @@ interface SupportsMsg {
   id: number;
   langId: string | null;
 }
-type IncomingMsg = InitMsg | ComputeMsg | ParseMsg | HighlightMsg | SupportsMsg;
+interface ImportScanMsg {
+  type: 'import-scan';
+  id: number;
+  text: string;
+  langId: string;
+  /** Skip the package/declaration extraction for languages that don't need it. */
+  jvm: boolean;
+}
+interface SymbolScanMsg {
+  type: 'symbol-scan';
+  id: number;
+  text: string;
+  langId: string;
+  jvm: boolean;
+}
+type IncomingMsg =
+  | InitMsg
+  | ComputeMsg
+  | ParseMsg
+  | HighlightMsg
+  | SupportsMsg
+  | ImportScanMsg
+  | SymbolScanMsg;
 
 interface OkResult {
   type: 'result';
@@ -109,13 +164,45 @@ function getLang(langId: string): Promise<LoadedLang | null> {
   return p;
 }
 
-function snapshot(node: Parser.SyntaxNode): AstNodeWire {
-  const oneLine = node.text.replace(/\s+/g, ' ').trim();
-  const preview = oneLine.length > 80 ? oneLine.slice(0, 77) + '…' : oneLine;
+/**
+ * How much source to collapse before checking whether we already have enough for an
+ * 80-char preview. Anything that isn't almost entirely whitespace clears the bar on the
+ * first window.
+ */
+const PREVIEW_WINDOW = 512;
+
+/**
+ * The previewed slice of a node's source — byte-for-byte what `node.text` would give,
+ * without reading the whole node.
+ *
+ * `node.text` materializes the node's entire span, and every ancestor re-copies what its
+ * descendants already copied, so previewing a tree cost O(file size x depth) — on a
+ * 320k-line repo that dominated the whole analysis. Since the result is capped at 80
+ * characters, a few hundred characters of source almost always decide it. The window
+ * grows only for the pathological case (a node that is nearly all whitespace), where it
+ * still ends up reading no more than the old code did.
+ *
+ * `startIndex`/`endIndex` are UTF-16 offsets into the same string we handed the parser
+ * (`parse()` slices it with exactly these indices), so the arithmetic is sound for
+ * non-ASCII source too.
+ */
+function previewOf(node: Parser.SyntaxNode, text: string): string {
+  const start = node.startIndex;
+  const end = node.endIndex;
+  for (let window = PREVIEW_WINDOW; ; window *= 8) {
+    const stop = Math.min(end, start + window);
+    const oneLine = text.slice(start, stop).replace(/\s+/g, ' ').trim();
+    // Past 80 chars the first 77 are settled, so more source cannot change the answer.
+    if (oneLine.length > 80) return oneLine.slice(0, 77) + '…';
+    if (stop >= end) return oneLine;
+  }
+}
+
+function snapshot(node: Parser.SyntaxNode, text: string): AstNodeWire {
   const children: AstNodeWire[] = [];
   for (let i = 0; i < node.namedChildCount; i++) {
     const c = node.namedChild(i);
-    if (c) children.push(snapshot(c));
+    if (c) children.push(snapshot(c, text));
   }
   return {
     type: node.type,
@@ -124,28 +211,71 @@ function snapshot(node: Parser.SyntaxNode): AstNodeWire {
     startCol: node.startPosition.column,
     endRow: node.endPosition.row,
     endCol: node.endPosition.column,
-    preview,
+    preview: previewOf(node, text),
     children,
   };
+}
+
+/** Parses and snapshots in one go, always releasing the native tree. */
+function withSnapshot<T>(loaded: LoadedLang, text: string, fn: (ast: AstNodeWire) => T): T | null {
+  const tree = loaded.parser.parse(text);
+  if (!tree) return null;
+  try {
+    return fn(snapshot(tree.rootNode, text));
+  } finally {
+    tree.delete();
+  }
 }
 
 async function handleParse(text: string, langId: string): Promise<AstNodeWire | null> {
   if (text.length > MAX_AST_BYTES) return null;
   const loaded = await getLang(langId);
   if (!loaded) return null;
-  const tree = loaded.parser.parse(text);
-  if (!tree) return null;
-  try {
-    return snapshot(tree.rootNode);
-  } finally {
-    tree.delete();
-  }
+  return withSnapshot(loaded, text, (ast) => ast);
 }
 
-async function handleHighlight(
+/**
+ * Module-graph scan. Runs the extractors next to the parser so only the handful of
+ * specifier strings crosses the worker boundary.
+ */
+async function handleImportScan(
   text: string,
   langId: string,
-): Promise<HighlightTokenWire[] | null> {
+  jvm: boolean,
+): Promise<ImportScanWire | null> {
+  if (text.length > MAX_AST_BYTES) return null;
+  const loaded = await getLang(langId);
+  if (!loaded) return null;
+  return withSnapshot(loaded, text, (ast) => ({
+    specifiers: extractImports(ast, langId).map((i) => i.specifier),
+    pkg: jvm ? extractPackage(ast, langId) : null,
+    decls: jvm ? extractTopLevelDeclarations(ast, langId) : [],
+  }));
+}
+
+/** Symbol-index scan — declarations, import bindings, raw references, branch counts. */
+async function handleSymbolScan(
+  text: string,
+  langId: string,
+  jvm: boolean,
+): Promise<SymbolScanWire | null> {
+  if (text.length > MAX_AST_BYTES) return null;
+  const loaded = await getLang(langId);
+  if (!loaded) return null;
+  return withSnapshot(loaded, text, (ast) => {
+    const symbols = extractFileSymbols(ast, langId);
+    const perSymbol = perSymbolComplexity(ast, langId, symbols);
+    return {
+      symbols,
+      bindings: extractImportBindings(ast, langId),
+      refs: extractRawRefs(ast, langId, symbols),
+      pkg: jvm ? extractPackage(ast, langId) : null,
+      complexity: symbols.map((s) => perSymbol.get(s) ?? 1),
+    };
+  });
+}
+
+async function handleHighlight(text: string, langId: string): Promise<HighlightTokenWire[] | null> {
   if (text.length > MAX_AST_BYTES) return null;
   const loaded = await getLang(langId);
   if (!loaded) return null;
@@ -298,6 +428,24 @@ addEventListener('message', async (ev: MessageEvent<IncomingMsg>) => {
     case 'parse': {
       try {
         const v = await handleParse(msg.text, msg.langId);
+        reply(msg.id, v);
+      } catch (e) {
+        replyError(msg.id, e instanceof Error ? e.message : String(e));
+      }
+      return;
+    }
+    case 'import-scan': {
+      try {
+        const v = await handleImportScan(msg.text, msg.langId, msg.jvm);
+        reply(msg.id, v);
+      } catch (e) {
+        replyError(msg.id, e instanceof Error ? e.message : String(e));
+      }
+      return;
+    }
+    case 'symbol-scan': {
+      try {
+        const v = await handleSymbolScan(msg.text, msg.langId, msg.jvm);
         reply(msg.id, v);
       } catch (e) {
         replyError(msg.id, e instanceof Error ? e.message : String(e));

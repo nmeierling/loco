@@ -18,8 +18,17 @@ test.describe('Risk metric', () => {
     const first = page.locator('loco-metric-list .row').first();
     await expect(first).toContainText('catalog.service.ts');
 
-    const scores = await page.$$eval('loco-metric-list .row', (rows) =>
-      rows.map((r) => Number((r.querySelectorAll('.td')[5]?.textContent ?? '0').trim())),
+    // Find the Risk column by its header rather than by a fixed offset — the table grew
+    // a Size column between LOC and Complexity, which silently shifted every index.
+    const headers = await page.locator('loco-metric-list .th-label').allTextContents();
+    const riskCol = headers.findIndex((h) => h.trim() === 'Risk');
+    expect(riskCol, 'no Risk column in the table header').toBeGreaterThanOrEqual(0);
+
+    const scores = await page.$$eval(
+      'loco-metric-list .row',
+      (rows, col) =>
+        rows.map((r) => Number((r.querySelectorAll('.td')[col]?.textContent ?? '0').trim())),
+      riskCol,
     );
     expect(scores[0]).toBeGreaterThan(0);
     expect(scores[0]).toBeLessThanOrEqual(100);
