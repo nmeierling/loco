@@ -16,7 +16,9 @@ export default defineConfig({
   use: {
     baseURL: BASE_URL,
     headless: true,
-    viewport: { width: 1500, height: 900 },
+    // No viewport here: the `chromium` project spreads `devices['Desktop Chrome']`,
+    // whose own viewport wins over anything set at this level. The suite runs at that
+    // device's 1280x720 — set it in the project below if it ever needs to be different.
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },

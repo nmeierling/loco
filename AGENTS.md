@@ -79,3 +79,31 @@ second time. `git log -- <path>` reports one commit for such a file. Churn walks
 loose, i.e. once per tree and blob read on a packed repo. Deriving the listing
 by scanning the file map made the walk O(files × objects): 6.8M key comparisons
 on a 300-commit toy repo. `makeGitFs` builds a directory→children Map up front.
+
+## Measuring performance
+
+`scripts/` carries a small harness for the thing this app is worst at: a real project.
+The fixture under `e2e/fixtures-data/` is 18 files, so nothing in the e2e suite tells you
+whether a change made loading a 3000-file repo faster or slower.
+
+```bash
+node scripts/gen-bench-project.mjs /tmp/bigproj 3000 105   # ~3000 files, ~324k LOC
+npx ng serve --port 4321 --host 127.0.0.1 &                # the harness drives a running server
+node scripts/bench.mjs before /tmp/bigproj                 # load pipeline + per-view layout
+node scripts/bench-interaction.mjs before /tmp/bigproj     # frame times, typing, matrix at file level
+```
+
+Both print `label<TAB>metric<TAB>value`, so a before/after is a diff of two runs. Set
+`CHROMIUM_PATH` only where Playwright cannot resolve its own browser (the Linux sandbox);
+locally, leave it unset.
+
+Two things worth knowing before you trust a number:
+
+* **Always measure a baseline from the same machine, in the same session.** These are
+  wall-clock numbers off a dev server, and they move a lot between machines. Stash your
+  change, run the harness, restore, run it again.
+* **`ng serve` is unoptimized**, so absolute values are pessimistic. The ratio is the
+  signal; the absolute number is not.
+
+The generated project has no `.git/`, so it exercises the analysis pipeline but not the
+history walk. Point the harness at a real repo to measure churn.

@@ -565,7 +565,12 @@ export class UsagesPanelComponent {
         const encl = ref.enclosingId ? idx.defsById.get(ref.enclosingId) : undefined;
         const unit = encl
           ? this.classUnit(encl, idx)
-          : { key: `mod:${ref.path}`, label: baseName(ref.path), path: ref.path, kind: 'module' as const };
+          : {
+              key: `mod:${ref.path}`,
+              label: baseName(ref.path),
+              path: ref.path,
+              kind: 'module' as const,
+            };
         add(groups, unit, def, ref);
       }
     }
@@ -628,9 +633,13 @@ export class UsagesPanelComponent {
   );
 
   /**
-   * Third-party symbols this file calls or reads, one row per fully-qualified name
-   * (package/module + imported class). Import-only rows are dropped; the call/read sites
-   * hang directly off each FQN so the first expand reveals them.
+   * Third-party symbols this file depends on, one row per fully-qualified name
+   * (package/module + imported class), with every site that touches it underneath.
+   *
+   * Unlike the in-repo tabs, the import line counts here. For a symbol declared in this
+   * repo the import is noise next to the call sites, but for a dependency the import
+   * *is* the dependency — it is where the coupling is declared, and a package that is
+   * imported and never used only shows up at all if the import is listed.
    */
   readonly external = computed<ExtGroup[]>(() => {
     const idx = this.index.index();
@@ -638,8 +647,6 @@ export class UsagesPanelComponent {
     const q = this.query().trim().toLowerCase();
     const groups = new Map<string, ExtGroup>();
     for (const r of idx.externalByPath.get(this.path()) ?? []) {
-      // Only call/read sites — the bare import line is not a usage.
-      if (r.kind === 'import') continue;
       const key = `${r.module} ${r.imported}`;
       let g = groups.get(key);
       if (!g) {
@@ -711,7 +718,14 @@ export class UsagesPanelComponent {
         }
       }
       const count = mem.reduce((s, m) => s + m.count, 0);
-      out.push({ key: unit.key, label: unit.label, path: unit.path, kind: unit.kind, count, members: mem });
+      out.push({
+        key: unit.key,
+        label: unit.label,
+        path: unit.path,
+        kind: unit.kind,
+        count,
+        members: mem,
+      });
     }
     return out.sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
   }

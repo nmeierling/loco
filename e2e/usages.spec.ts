@@ -102,9 +102,17 @@ test.describe('AST usages panel', () => {
     await expect(dep).toContainText(/\d+×/);
 
     await dep.click();
-    const ref = page.locator('loco-usages-panel .ref').first();
-    await expect(ref).toBeVisible();
-    await expect(ref.locator('code')).toContainText('Subject');
+    const refs = page.locator('loco-usages-panel .ref');
+
+    // Both halves are listed: where the dependency enters the file and where it is used.
+    // The import counts out here precisely because a package can be imported and never
+    // touched, and that is worth seeing.
+    await expect(refs.filter({ hasText: 'import' }).first().locator('code')).toContainText(
+      "import { Subject } from 'rxjs'",
+    );
+    await expect(refs.filter({ hasText: 'read' }).first().locator('code')).toContainText(
+      'new Subject<void>()',
+    );
   });
 
   test('the Self tab ranks a file’s members by how often it uses them itself', async ({ page }) => {
